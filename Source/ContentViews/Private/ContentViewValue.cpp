@@ -70,7 +70,8 @@ FContentViewValue FContentViewValue::OfBool(bool bInValue)
 FContentViewValue FContentViewValue::FromTagString(const FString& Raw)
 {
 	const FString Text = Raw.TrimStartAndEnd();
-	if (Text.IsEmpty())
+	// "None" is how the registry writes an empty object reference.
+	if (Text.IsEmpty() || Text == TEXT("None"))
 	{
 		return FContentViewValue();
 	}

@@ -44,7 +44,7 @@ struct CONTENTVIEWS_API FContentViewValue
 
 	/**
 	 * A registry tag's text as a value: a number when it parses as one, True/False as a bool, otherwise a string. An object
-	 * path, or a comma list of them, keeps the path and shows the object names. Empty text is no value.
+	 * path, or a comma list of them, keeps the path and shows the object names. Empty text, or None (an empty reference), is no value.
 	 */
 	static FContentViewValue FromTagString(const FString& Raw);
 

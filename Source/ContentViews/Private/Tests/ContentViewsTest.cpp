@@ -51,7 +51,7 @@ namespace
 			View = NewObject<UContentViewDefinition>(ViewPackage, TEXT("CV_ContentViewsTest"), RF_Public | RF_Standalone);
 			View->DisplayName = FText::FromString(TEXT("Content Views Test"));
 			View->RowClass = UContentViewsTestRow::StaticClass();
-			View->Columns = {TEXT("Name"), TEXT("Speed"), TEXT("Team"), TEXT("bKeeper"), TEXT("Roles")};
+			View->Columns = {TEXT("Name"), TEXT("Speed"), TEXT("Crew"), TEXT("bKeeper"), TEXT("Roles")};
 			Register(View);
 		}
 
@@ -66,12 +66,12 @@ namespace
 			}
 		}
 
-		void MakeRow(const TCHAR* Name, float Speed, const TCHAR* Team, bool bKeeper, const TCHAR* Roles)
+		void MakeRow(const TCHAR* Name, float Speed, const TCHAR* Crew, bool bKeeper, const TCHAR* Roles)
 		{
 			UPackage* Package = CreatePackage(*(Folder / Name));
 			UContentViewsTestRow* Row = NewObject<UContentViewsTestRow>(Package, Name, RF_Public | RF_Standalone);
 			Row->Speed = Speed;
-			Row->Team = Team;
+			Row->Crew = Crew;
 			Row->bKeeper = bKeeper;
 			Row->Roles = Roles;
 			Register(Row);
@@ -160,8 +160,8 @@ bool FContentViewsListsTheClassTest::RunTest(const FString& Parameters)
 	}
 	const FContentViewValue& Speed = Fast->Values.FindChecked(TEXT("Speed"));
 	TestTrue(TEXT("Speed is a number"), Speed.bIsSet && Speed.Type == EContentViewValueType::Number && Speed.Number == 90.0);
-	const FContentViewValue& Team = Fast->Values.FindChecked(TEXT("Team"));
-	TestTrue(TEXT("Team is the string Red"), Team.Type == EContentViewValueType::String && Team.String == TEXT("Red"));
+	const FContentViewValue& Crew = Fast->Values.FindChecked(TEXT("Crew"));
+	TestTrue(TEXT("Crew is the string Red"), Crew.Type == EContentViewValueType::String && Crew.String == TEXT("Red"));
 	const FContentViewValue& Keeper = Fast->Values.FindChecked(TEXT("bKeeper"));
 	TestTrue(TEXT("bKeeper is the bool false"), Keeper.bIsSet && Keeper.Type == EContentViewValueType::Bool && !Keeper.bBool);
 
@@ -188,7 +188,7 @@ bool FContentViewsFiltersTest::RunTest(const FString& Parameters)
 		FString(TEXT("BP_Row_Child,Row_Fast")));
 	TestEqual(TEXT("Speed <= 40"), Rows.Names({F::Filter(TEXT("Speed"), EContentViewFilterOp::AtMost, TEXT("40"))}),
 		FString(TEXT("Row_Slow")));
-	TestEqual(TEXT("Team != Red (the child has no team)"), Rows.Names({F::Filter(TEXT("Team"), EContentViewFilterOp::NotEquals, TEXT("red"))}),
+	TestEqual(TEXT("Crew != Red (the child has no crew)"), Rows.Names({F::Filter(TEXT("Crew"), EContentViewFilterOp::NotEquals, TEXT("red"))}),
 		FString(TEXT("BP_Row_Child,Row_Slow")));
 	TestEqual(TEXT("bKeeper = True"), Rows.Names({F::Filter(TEXT("bKeeper"), EContentViewFilterOp::Equals, TEXT("True"))}),
 		FString(TEXT("Row_Slow")));
@@ -198,7 +198,7 @@ bool FContentViewsFiltersTest::RunTest(const FString& Parameters)
 		FString(TEXT("Row_Slow")));
 	TestEqual(TEXT("Roles has tag Role.Tan is no tag"), Rows.Names({F::Filter(TEXT("Roles"), EContentViewFilterOp::HasTag, TEXT("Role.Tan"))}),
 		FString(TEXT("")));
-	TestEqual(TEXT("Team contains ue"), Rows.Names({F::Filter(TEXT("Team"), EContentViewFilterOp::Contains, TEXT("UE"))}),
+	TestEqual(TEXT("Crew contains ue"), Rows.Names({F::Filter(TEXT("Crew"), EContentViewFilterOp::Contains, TEXT("UE"))}),
 		FString(TEXT("Row_Slow")));
 	TestFalse(TEXT("Speed >= fast is refused"),
 		UE::ContentViews::CheckFilter(F::Filter(TEXT("Speed"), EContentViewFilterOp::AtLeast, TEXT("fast"))).IsEmpty());
@@ -242,7 +242,7 @@ bool FContentViewsValidationTest::RunTest(const FString& Parameters)
 /**
  * Situation: an agent calls the RunView tool through the toolset registry, as MCP does, sorted and limited.
  * Why it matters: an agent acts on the rows, so each needs its asset path, and numbers must arrive as numbers.
- * Pass: two rows, fastest first, each with its path and Speed a JSON number, Team a string, bKeeper a bool, unset null.
+ * Pass: two rows, fastest first, each with its path and Speed a JSON number, Crew a string, bKeeper a bool, unset null.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsRunViewToolTest,
 	"ContentViews.RunViewAnswersWithPathsAndTypedJson",
@@ -286,10 +286,10 @@ bool FContentViewsRunViewToolTest::RunTest(const FString& Parameters)
 			const TSharedPtr<FJsonObject> Values = First->GetObjectField(TEXT("values"));
 			TestEqual(TEXT("Speed is a JSON number"), Values->GetField<EJson::None>(TEXT("Speed"))->Type, EJson::Number);
 			TestEqual(TEXT("Speed is 90"), Values->GetNumberField(TEXT("Speed")), 90.0);
-			TestEqual(TEXT("Team is a JSON string"), Values->GetStringField(TEXT("Team")), FString(TEXT("Red")));
+			TestEqual(TEXT("Crew is a JSON string"), Values->GetStringField(TEXT("Crew")), FString(TEXT("Red")));
 			TestEqual(TEXT("bKeeper is a JSON bool"), Values->GetField<EJson::None>(TEXT("bKeeper"))->Type, EJson::Boolean);
 			const TSharedPtr<FJsonObject> Second = (*Found)[1]->AsObject()->GetObjectField(TEXT("values"));
-			TestEqual(TEXT("the child's unset Team is null"), Second->GetField<EJson::None>(TEXT("Team"))->Type, EJson::Null);
+			TestEqual(TEXT("the child's unset Crew is null"), Second->GetField<EJson::None>(TEXT("Crew"))->Type, EJson::Null);
 		}));
 	return true;
 }

@@ -20,6 +20,7 @@ public class ContentViews : ModuleRules
 			"Slate",
 			"SlateCore",
 			"InputCore",
+			"ApplicationCore",
 			"UnrealEd",
 			"ContentBrowser",
 			"ContentBrowserData",

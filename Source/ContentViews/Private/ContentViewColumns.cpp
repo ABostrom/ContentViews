@@ -87,10 +87,11 @@ namespace UE::ContentViews
 		{
 			return FContentViewValue();
 		}
+		// A plain string can read back as empty text, so only text with words is taken as text.
 		FText Text;
-		if (Found.TryGetAsText(Text))
+		if (Found.TryGetAsText(Text) && !Text.IsEmpty())
 		{
-			return Text.IsEmpty() ? FContentViewValue() : FContentViewValue::OfString(Text.ToString());
+			return FContentViewValue::OfString(Text.ToString());
 		}
 		return FContentViewValue::FromTagString(Found.AsString());
 	}

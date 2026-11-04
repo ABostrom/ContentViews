@@ -15,7 +15,7 @@ public:
 	float Speed = 0.f;
 
 	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "Test")
-	FString Team;
+	FString Crew;
 
 	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "Test")
 	bool bKeeper = false;
