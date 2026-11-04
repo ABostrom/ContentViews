@@ -1,22 +1,74 @@
 # Content Views
 
-An Unreal Engine editor plugin for data-driven views of assets.
+Data-driven tables of assets for the Unreal Engine 5.8 editor.
 
-A **view** is an asset: which class its rows are (or a query), which columns to show, the default sort, filters, and list or tile mode. Make a new view in the editor and it appears as a new way to browse your content, with no code.
+A **view** is an asset. It says which class's assets are the rows, which columns to show, how to sort, which filters
+apply, and whether to show a list or tiles. Make a new view in the editor and you have a new way to browse your content,
+with no code. Views read the asset registry only, so listing a thousand assets loads none of them.
 
-Two backends read the same view assets:
+![The Content Views tab showing a view in list mode](docs/images/content-views-list.png)
+<!-- SCREENSHOT PLACEHOLDER: filled from the stage one captures -->
 
-- **Legacy**: the stock Content Browser asset view (`IContentBrowserSingleton::CreateAssetPicker`) with custom columns from asset registry tags, plus frontend filters that also work in the normal Content Browser. Works today.
-- **TEDS**: one Content Source per view in the Content Browser's source toolbar, built on Editor Data Storage. Experimental, like TEDS itself.
+What you get today (stage one):
 
-Editor-only. Nothing in this plugin reaches a cooked game.
+- **Window > Tools > Content Views**: every view asset on the left, the chosen view on the right as the stock Content
+  Browser asset view, with its own columns, sort and filters. Double-click opens an asset; right-click gives the Content
+  Browser's asset menu.
+- **Content Browser filters**: each view is also a filter under *Content Views* in every Content Browser's filter menu.
+- **An MCP toolset** (`ContentViews.ContentViewsTools`) so AI agents can list views, read their typed columns and run
+  them, getting rows back as JSON with each asset's path.
 
-## Status
+Planned (stage two): a TEDS backend that shows each view as a Content Source. It is not built yet. See
+[docs/how-it-works.md](docs/how-it-works.md) and the first issue on this repository.
 
-Scaffold. Plan and stages: see the first issue on this repository.
+Editor only. Nothing in this plugin reaches a cooked game.
 
-## Using it in a project
+## Install
 
-Columns come from asset registry tags, so mark the fields you want to browse `AssetRegistrySearchable`, or emit computed ones from `GetAssetRegistryTags`. Computed columns that need code are small column providers registered by name.
+Copy this repository into your project's `Plugins/ContentViews` folder, or pull it in with git subtree:
 
-Targets Unreal Engine 5.8.
+```
+git subtree add --prefix=<Project>/Plugins/ContentViews https://github.com/ABostrom/ContentViews.git main --squash
+```
+
+Enable it for the editor only in your `.uproject`:
+
+```json
+{ "Name": "ContentViews", "Enabled": true, "TargetAllowList": [ "Editor" ] }
+```
+
+It enables the engine's experimental `ToolsetRegistry` plugin, which hosts the MCP toolset. Rebuild your editor target.
+
+## Five-minute quick start
+
+1. **Make a field visible to the registry.** On the class whose assets you want to browse, mark the fields
+   `AssetRegistrySearchable`:
+
+   ```cpp
+   UPROPERTY(EditAnywhere, BlueprintReadOnly, AssetRegistrySearchable, Category = "Stats")
+   float Speed = 0.f;
+   ```
+
+   Rebuild, then resave those assets once (select them in the Content Browser, right-click, *Save*). The registry only
+   learns a tag when an asset is saved.
+
+2. **Make a view asset.** In the Content Browser: *Add > Miscellaneous > Data Asset*, pick `Content View Definition`.
+   Set *Display Name*, set *Row Class* to your class, and add columns by name: `Name`, `Speed`. Pick a *Default Sort*
+   (`Speed`, descending) and a *Mode* (List or Tiles). Save it under `/Game`.
+
+3. **Open it.** *Window > Tools > Content Views*, then click your view. Or type `ContentViews.Open <view name>` in the
+   console.
+
+Your view also appears in every Content Browser's filter menu under *Content Views*.
+
+Columns named `Name`, `Path`, `Plugin` and `Class` always work. Columns that need code (an average, a reverse lookup)
+are small providers registered by name; see [docs/how-it-works.md](docs/how-it-works.md).
+
+## Tests
+
+`ContentViews.*` automation tests run in an editor: a view over a class and its Blueprint children with typed values,
+every filter operator, validation, and the `RunView` tool called through the toolset registry the way MCP calls it.
+
+## Licence and status
+
+Stage one (the legacy Content Browser backend and the MCP toolset) is built. Stage two (TEDS) is planned.
