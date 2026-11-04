@@ -158,29 +158,29 @@ asset has no value.
 Every argument is required over MCP, even where the C++ function has a default: pass `[]`, `""`, `false` and `0` for
 no filters, the default sort and all rows.
 
-A `ListViews` call (no arguments) answers, in a project with an Arenas view (one entry shown):
+A `ListViews` call (no arguments) answers, in a project with a Levels view (one entry shown):
 
 ```json
-[{"name": "Arenas", "assetPath": "/Game/Editor/ContentViews/CV_Arenas.CV_Arenas",
-  "rowClass": "/Script/ArenaCore.ArenaDefinition", "columns": ["Name", "Plugin", "Level", "Looks", "District"]}]
+[{"name": "Levels", "assetPath": "/Game/Editor/ContentViews/CV_Levels.CV_Levels",
+  "rowClass": "/Script/MyGame.LevelDefinition", "columns": ["Name", "Plugin", "Map", "Variants", "Theme"]}]
 ```
 
 A `RunView` call:
 
 ```json
-{"view": "Arenas", "filters": [], "sortColumn": "", "bSortDescending": false, "limit": 0}
+{"view": "Levels", "filters": [], "sortColumn": "", "bSortDescending": false, "limit": 0}
 ```
 
-answers with one row per arena (two shown). `Looks` is a number, an empty reference is `null`, and a reference keeps
+answers with one row per level (two shown). `Variants` is a number, an empty reference is `null`, and a reference keeps
 its full path so an agent can open or edit it:
 
 ```json
-[{"assetPath": "/Arena_Docks/Data/DA_Arena_Docks.DA_Arena_Docks",
-  "values": {"Name": "DA_Arena_Docks", "Plugin": "Arena_Docks", "Level": "/Arena_Docks/Maps/L_Arena_Docks.L_Arena_Docks",
-             "Looks": 2, "District": "/Script/ArenaCore.ArenaDistrictRules'/Kit_Docks/Data/DA_District_Docks.DA_District_Docks'"}},
- {"assetPath": "/Arena_Rooftop/Data/DA_Arena_Rooftop.DA_Arena_Rooftop",
-  "values": {"Name": "DA_Arena_Rooftop", "Plugin": "Arena_Rooftop", "Level": "/Arena_Rooftop/Maps/L_Arena_Rooftop.L_Arena_Rooftop",
-             "Looks": 2, "District": null}}]
+[{"assetPath": "/Level_Harbour/Data/DA_Level_Harbour.DA_Level_Harbour",
+  "values": {"Name": "DA_Level_Harbour", "Plugin": "Level_Harbour", "Map": "/Level_Harbour/Maps/L_Harbour.L_Harbour",
+             "Variants": 2, "Theme": "/Script/MyGame.LevelTheme'/Theme_Harbour/Data/DA_Theme_Harbour.DA_Theme_Harbour'"}},
+ {"assetPath": "/Level_Roof/Data/DA_Level_Roof.DA_Level_Roof",
+  "values": {"Name": "DA_Level_Roof", "Plugin": "Level_Roof", "Map": "/Level_Roof/Maps/L_Roof.L_Roof",
+             "Variants": 2, "Theme": null}}]
 ```
 
 A bad filter, an unknown view or a column no row carries is refused with a script error naming it.
