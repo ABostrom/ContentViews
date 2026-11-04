@@ -6,15 +6,20 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetToolsModule.h"
 #include "AssetViewSortManager.h"
+#include "ContentBrowserDataMenuContexts.h"
+#include "ContentBrowserDataSubsystem.h"
 #include "ContentBrowserMenuContexts.h"
 #include "ContentBrowserModule.h"
 #include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
 #include "Editor.h"
+#include "Framework/Commands/InputBindingManager.h"
+#include "Framework/Commands/UICommandList.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/MultiBox/MultiBoxExtender.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "IContentBrowserDataModule.h"
 #include "IContentBrowserSingleton.h"
 #include "SAssetView.h"
 #include "Styling/AppStyle.h"
@@ -72,8 +77,27 @@ namespace
 		return Class ? UToolMenus::JoinMenuPaths(BaseMenuName, Class->GetFName()) : BaseMenuName;
 	}
 
-	/** The Content Browser's asset menu for the selection: its registered entries, with Edit, Browse and Copy Reference. */
-	TSharedPtr<SWidget> ContentViewAssetMenu(const TArray<FAssetData>& Assets)
+	/** The selection as Content Browser items, as the asset view's own menu passes them to its extenders. */
+	TArray<FContentBrowserItem> ContentViewBrowserItems(const TArray<FAssetData>& Assets)
+	{
+		UContentBrowserDataSubsystem* Data = IContentBrowserDataModule::Get().GetSubsystem();
+		TArray<FContentBrowserItem> Items;
+		for (const FAssetData& Asset : Assets)
+		{
+			const FName Virtual = Data->ConvertInternalPathToVirtual(FName(Asset.GetObjectPathString()));
+			const FContentBrowserItem Item = Data->GetItemAtPath(Virtual, EContentBrowserItemTypeFilter::IncludeFiles);
+			if (Item.IsValid())
+			{
+				Items.Add(Item);
+			}
+		}
+		return Items;
+	}
+}
+
+namespace UE::ContentViews
+{
+	TSharedPtr<SWidget> MakeAssetContextMenu(const TArray<FAssetData>& Assets)
 	{
 		if (Assets.IsEmpty())
 		{
@@ -141,9 +165,44 @@ namespace
 				Builder.EndSection();
 			}));
 
-		FToolMenuContext MenuContext(nullptr, Extender, Context);
+		// The Content Browser's command list: its extenders bind the commands its menu entries name (Reference Viewer, ...).
+		FContentBrowserModule& Browser = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
+		const TSharedRef<FUICommandList> Commands = MakeShared<FUICommandList>();
+		for (FContentBrowserCommandExtender& CommandExtender : Browser.GetAllContentBrowserCommandExtenders())
+		{
+			CommandExtender.ExecuteIfBound(Commands, FOnContentBrowserGetSelection::CreateLambda(
+				[Assets](TArray<FAssetData>& OutAssets, TArray<FString>& OutPaths) { OutAssets = Assets; }));
+		}
+		// Modules that keep their own list for the Content Browser append it here (Manage Tags), as SContentBrowser does.
+		FInputBindingManager::Get().RegisterCommandList(TEXT("ContentBrowser"), Commands);
+
+		// The legacy extenders the asset view's menu combines, beside the tab's own entries.
+		TArray<TSharedPtr<FExtender>> Extenders{Extender};
+		for (FContentBrowserMenuExtender_SelectedAssets& MenuExtender : Browser.GetAllAssetViewContextMenuExtenders())
+		{
+			if (MenuExtender.IsBound())
+			{
+				Extenders.Add(MenuExtender.Execute(Assets));
+			}
+		}
+
+		FToolMenuContext MenuContext(Commands, FExtender::Combine(Extenders), Context);
+
+		// Extenders of ContentBrowser.AssetContextMenu read this context unchecked: the asset view always adds it.
+		UContentBrowserDataMenuContext_FileMenu* DataContext = NewObject<UContentBrowserDataMenuContext_FileMenu>();
+		DataContext->SelectedItems = ContentViewBrowserItems(Assets);
+		DataContext->bCanBeModified = Context->bCanBeModified;
+		DataContext->bCanView = Context->bCanView;
+		DataContext->bHasCookedPackages = Context->bHasCookedPackages;
+		DataContext->bContainsUnsupportedAssets = Context->bContainsUnsupportedAssets;
+		MenuContext.AddObject(DataContext);
+
 		return UToolMenus::Get()->GenerateWidget(ContentViewRegisterMenuHierarchy(Common), MenuContext);
 	}
+}
+
+namespace
+{
 
 	/** The view as the stock asset picker: its rows, its columns from the registry and providers, list or tiles. */
 	TSharedRef<SWidget> ContentViewMakePicker(const UContentViewDefinition& View)
@@ -213,7 +272,7 @@ namespace
 		{
 			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorsForAssets(TArray<FSoftObjectPath>{Asset.GetSoftObjectPath()});
 		});
-		Config.OnGetAssetContextMenu = FOnGetAssetContextMenu::CreateStatic(&ContentViewAssetMenu);
+		Config.OnGetAssetContextMenu = FOnGetAssetContextMenu::CreateStatic(&UE::ContentViews::MakeAssetContextMenu);
 
 		const TSharedRef<SWidget> Picker =
 			FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser").Get().CreateAssetPicker(Config);

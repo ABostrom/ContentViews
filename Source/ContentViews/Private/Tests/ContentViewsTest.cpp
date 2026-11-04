@@ -11,6 +11,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/DataValidation.h"
+#include "SContentViewsTab.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
@@ -291,6 +292,38 @@ bool FContentViewsRunViewToolTest::RunTest(const FString& Parameters)
 			const TSharedPtr<FJsonObject> Second = (*Found)[1]->AsObject()->GetObjectField(TEXT("values"));
 			TestEqual(TEXT("the child's unset Crew is null"), Second->GetField<EJson::None>(TEXT("Crew"))->Type, EJson::Null);
 		}));
+	return true;
+}
+
+/**
+ * Situation: the tab's right-click menu built for one row of every view asset (the fixture's and the project's), and for
+ * the fixture's rows together, with every extender the editor has registered on the Content Browser's asset menu.
+ * Why it matters: extenders read the Content Browser's menu contexts without checking them; a context the tab leaves out
+ * crashed the editor on a right-click (PluginBrowser read the file-menu context, null).
+ * Pass: a menu for each, and the editor still running.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsContextMenuTest,
+	"ContentViews.TheRightClickMenuOpensOnARowOfEveryView",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsContextMenuTest::RunTest(const FString& Parameters)
+{
+	FContentViewsTestRows Rows;
+	const TArray<FAssetData> FixtureRows = UE::ContentViews::GatherRows(*Rows.View);
+	TestEqual(TEXT("the fixture's three rows"), FixtureRows.Num(), 3);
+	TestTrue(TEXT("a menu for the fixture's rows together"), UE::ContentViews::MakeAssetContextMenu(FixtureRows).IsValid());
+
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get().WaitForCompletion();
+	for (const FAssetData& ViewAsset : UE::ContentViews::FindViews())
+	{
+		const UContentViewDefinition* View = Cast<UContentViewDefinition>(ViewAsset.GetAsset());
+		const TArray<FAssetData> ViewRows = View ? UE::ContentViews::GatherRows(*View) : TArray<FAssetData>();
+		if (!ViewRows.IsEmpty())
+		{
+			TestTrue(*FString::Printf(TEXT("a menu for %s in %s"), *ViewRows[0].AssetName.ToString(), *View->GetName()),
+				UE::ContentViews::MakeAssetContextMenu({ViewRows[0]}).IsValid());
+		}
+	}
 	return true;
 }
 
