@@ -155,21 +155,32 @@ A view is named by display name, asset name or object path. Values arrive typed:
 registered with the toolset registry writes each `FContentViewValue` as a JSON number, bool, string, or `null` when the
 asset has no value.
 
-A `ListViews` call and its answer:
+Every argument is required over MCP, even where the C++ function has a default: pass `[]`, `""`, `false` and `0` for
+no filters, the default sort and all rows.
+
+A `ListViews` call (no arguments) answers, in a project with an Arenas view (one entry shown):
 
 ```json
-REAL OUTPUT PLACEHOLDER: ListViews
+[{"name": "Arenas", "assetPath": "/Game/Editor/ContentViews/CV_Arenas.CV_Arenas",
+  "rowClass": "/Script/ArenaCore.ArenaDefinition", "columns": ["Name", "Plugin", "Level", "Looks", "District"]}]
 ```
 
-A `RunView` call with an extra filter, a sort and a limit:
+A `RunView` call:
 
 ```json
-{"view": "Players", "filters": [{"column": "Pace", "operator": "AtLeast", "value": "70"}],
- "sortColumn": "Overall", "bSortDescending": true, "limit": 3}
+{"view": "Arenas", "filters": [], "sortColumn": "", "bSortDescending": false, "limit": 0}
 ```
 
+answers with one row per arena (two shown). `Looks` is a number, an empty reference is `null`, and a reference keeps
+its full path so an agent can open or edit it:
+
 ```json
-REAL OUTPUT PLACEHOLDER: RunView
+[{"assetPath": "/Arena_Docks/Data/DA_Arena_Docks.DA_Arena_Docks",
+  "values": {"Name": "DA_Arena_Docks", "Plugin": "Arena_Docks", "Level": "/Arena_Docks/Maps/L_Arena_Docks.L_Arena_Docks",
+             "Looks": 2, "District": "/Script/ArenaCore.ArenaDistrictRules'/Kit_Docks/Data/DA_District_Docks.DA_District_Docks'"}},
+ {"assetPath": "/Arena_Rooftop/Data/DA_Arena_Rooftop.DA_Arena_Rooftop",
+  "values": {"Name": "DA_Arena_Rooftop", "Plugin": "Arena_Rooftop", "Level": "/Arena_Rooftop/Maps/L_Arena_Rooftop.L_Arena_Rooftop",
+             "Looks": 2, "District": null}}]
 ```
 
 A bad filter, an unknown view or a column no row carries is refused with a script error naming it.
@@ -197,5 +208,8 @@ tools, the frontend filters and either backend all agree on what a view is.
   declares a type always returns that type.
 - **Editor only.** The module is `Type: Editor` with `TargetAllowList: ["Editor"]`. Registry tags written in
   `GetAssetRegistryTags` should sit under `WITH_EDITOR` in runtime classes.
+- **A computed column shadows a tag.** A registered column answers for its name in every view, so a registry tag of the
+  same name can no longer be read as a column. Name computed columns for what they compute.
+- **Tiles show names.** In Tiles mode the asset view shows each row's thumbnail and name; the other columns show in List.
 - **Stock menu, not all of it.** The right-click menu has the Content Browser's registered entries and three of its
   own, not the Content Browser's private common section.

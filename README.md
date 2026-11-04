@@ -6,8 +6,8 @@ A **view** is an asset. It says which class's assets are the rows, which columns
 apply, and whether to show a list or tiles. Make a new view in the editor and you have a new way to browse your content,
 with no code. Views read the asset registry only, so listing a thousand assets loads none of them.
 
-![The Content Views tab showing a view in list mode](docs/images/content-views-list.png)
-<!-- SCREENSHOT PLACEHOLDER: filled from the stage one captures -->
+The tab looks like the Content Browser because it is the Content Browser's own asset view: the view list on the left,
+and on the right the chosen view's rows with one column per view column, sortable by any of them.
 
 What you get today (stage one):
 
@@ -69,6 +69,6 @@ are small providers registered by name; see [docs/how-it-works.md](docs/how-it-w
 `ContentViews.*` automation tests run in an editor: a view over a class and its Blueprint children with typed values,
 every filter operator, validation, and the `RunView` tool called through the toolset registry the way MCP calls it.
 
-## Licence and status
+## Status
 
 Stage one (the legacy Content Browser backend and the MCP toolset) is built. Stage two (TEDS) is planned.
