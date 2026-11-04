@@ -11,10 +11,10 @@ and on the right the chosen view's rows with one column per view column, sortabl
 
 What you get today (stage one):
 
-- **Window > Tools > Content Views**: every view asset on the left, the chosen view on the right as the stock Content
+- **Tools > Content Views**: every view asset on the left, the chosen view on the right as the stock Content
   Browser asset view, with its own columns, sort and filters. Double-click opens an asset; right-click gives the Content
   Browser's asset menu.
-- **Content Browser filters**: each view is also a filter under *Content Views* in every Content Browser's filter menu.
+- **Content Browser filters**: each view is also a filter in every Content Browser's filter menu, under *Advanced > All Filters > Content Views*.
 - **An MCP toolset** (`ContentViews.ContentViewsTools`) so AI agents can list views, read their typed columns and run
   them, getting rows back as JSON with each asset's path.
 
@@ -56,10 +56,10 @@ It enables the engine's experimental `ToolsetRegistry` plugin, which hosts the M
    Set *Display Name*, set *Row Class* to your class, and add columns by name: `Name`, `Speed`. Pick a *Default Sort*
    (`Speed`, descending) and a *Mode* (List or Tiles). Save it under `/Game`.
 
-3. **Open it.** *Window > Tools > Content Views*, then click your view. Or type `ContentViews.Open <view name>` in the
+3. **Open it.** *Tools > Content Views* (the main menu's Tools, its Tools section), then click your view. Or type `ContentViews.Open <view name>` in the
    console.
 
-Your view also appears in every Content Browser's filter menu under *Content Views*.
+Your view also appears in every Content Browser's filter menu under *Advanced > All Filters > Content Views*.
 
 Columns named `Name`, `Path`, `Plugin` and `Class` always work. Columns that need code (an average, a reverse lookup)
 are small providers registered by name; see [docs/how-it-works.md](docs/how-it-works.md).
