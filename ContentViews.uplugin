@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Content Views",
+	"Description": "Data-driven views of assets in the Content Browser. One view asset describes rows, columns, sort and filters; a legacy backend shows it through the stock asset view, a TEDS backend as a Content Source.",
+	"Category": "Editor",
+	"CreatedBy": "Aaron Bostrom",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "ContentViews",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
