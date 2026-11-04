@@ -30,6 +30,9 @@ public:
 	/** Shows View on the right and selects it on the left. */
 	void ShowView(const UContentViewDefinition& View);
 
+	/** The view assets the list on the left shows, in order. */
+	TArray<FSoftObjectPath> GetListedViews() const;
+
 private:
 	using FViewItem = TSharedPtr<FAssetData>;
 

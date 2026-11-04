@@ -345,6 +345,16 @@ void SContentViewsTab::ShowView(const UContentViewDefinition& View)
 	}
 }
 
+TArray<FSoftObjectPath> SContentViewsTab::GetListedViews() const
+{
+	TArray<FSoftObjectPath> Paths;
+	for (const FViewItem& Item : ViewItems)
+	{
+		Paths.Add(Item->GetSoftObjectPath());
+	}
+	return Paths;
+}
+
 void SContentViewsTab::RefreshViewList()
 {
 	const FSoftObjectPath Selected = Shown.IsValid() ? FSoftObjectPath(Shown.Get()) : FSoftObjectPath();

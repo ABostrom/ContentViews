@@ -1,4 +1,5 @@
 #include "ContentViewsFilterExtension.h"
+#include "ContentViewsSettings.h"
 
 #include "Algo/AllOf.h"
 #include "ContentBrowserItem.h"
@@ -67,6 +68,10 @@ namespace
 void UContentViewsFilterExtension::AddFrontEndFilterExtensions(TSharedPtr<FFrontendFilterCategory> DefaultCategory,
 	TArray<TSharedRef<FFrontendFilter>>& InOutFilterList) const
 {
+	if (!UContentViewsSettings::IsLegacyActive())
+	{
+		return;
+	}
 	const TSharedPtr<FFrontendFilterCategory> Category = MakeShared<FFrontendFilterCategory>(
 		LOCTEXT("CategoryName", "Content Views"), LOCTEXT("CategoryTooltip", "The rows of each Content View."));
 	for (const FAssetData& Asset : UE::ContentViews::FindViews())

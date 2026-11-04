@@ -6,7 +6,7 @@
 
 /** The row class the plugin's tests build views over: one field of each kind a column reads. */
 UCLASS(Blueprintable, HideDropdown, NotPlaceable)
-class UContentViewsTestRow : public UObject
+class CONTENTVIEWS_API UContentViewsTestRow : public UObject
 {
 	GENERATED_BODY()
 

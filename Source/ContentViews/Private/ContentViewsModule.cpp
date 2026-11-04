@@ -2,6 +2,7 @@
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
 #include "ContentViewValueConverter.h"
+#include "ContentViewsSettings.h"
 #include "ContentViewsTools.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
@@ -93,7 +94,12 @@ public:
 			.SetDisplayName(LOCTEXT("TabName", "Content Views"))
 			.SetTooltipText(LOCTEXT("TabTooltip", "Browse assets through view assets: rows, columns, sort and filters."))
 			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.TabIcon"))
-			.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory());
+			.SetGroup(WorkspaceMenu::GetMenuStructure().GetToolsCategory())
+			// Read every time the menu is built, so the backend setting applies at once.
+			.SetMenuType(TAttribute<ETabSpawnerMenuType::Type>::CreateLambda([]()
+			{
+				return UContentViewsSettings::IsLegacyActive() ? ETabSpawnerMenuType::Enabled : ETabSpawnerMenuType::Hidden;
+			}));
 
 		OpenCommand = MakeUnique<FAutoConsoleCommand>(TEXT("ContentViews.Open"),
 			TEXT("Opens the Content Views tab. ContentViews.Open [view name] [width height]"),

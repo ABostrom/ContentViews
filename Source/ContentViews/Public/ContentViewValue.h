@@ -38,9 +38,15 @@ struct CONTENTVIEWS_API FContentViewValue
 	UPROPERTY(BlueprintReadOnly, Category = "Content Views")
 	FString Display;
 
+	/** What a provider found wrong in the asset, such as a tag it needs and the asset lacks. Not part of the value. */
+	FString Problem;
+
 	static FContentViewValue OfString(FString InValue, FString InDisplay = FString());
 	static FContentViewValue OfNumber(double InValue);
 	static FContentViewValue OfBool(bool bInValue);
+
+	/** No value, and why: what a provider reports when an asset cannot give one. */
+	static FContentViewValue OfProblem(FString InProblem);
 
 	/**
 	 * A registry tag's text as a value: a number when it parses as one, True/False as a bool, otherwise a string. An object

@@ -67,6 +67,13 @@ FContentViewValue FContentViewValue::OfBool(bool bInValue)
 	return Value;
 }
 
+FContentViewValue FContentViewValue::OfProblem(FString InProblem)
+{
+	FContentViewValue Value;
+	Value.Problem = MoveTemp(InProblem);
+	return Value;
+}
+
 FContentViewValue FContentViewValue::FromTagString(const FString& Raw)
 {
 	const FString Text = Raw.TrimStartAndEnd();

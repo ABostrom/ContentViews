@@ -9,7 +9,7 @@ with no code. Views read the asset registry only, so listing a thousand assets l
 The tab looks like the Content Browser because it is the Content Browser's own asset view: the view list on the left,
 and on the right the chosen view's rows with one column per view column, sortable by any of them.
 
-What you get today (stage one):
+What you get:
 
 - **Tools > Content Views**: every view asset on the left, the chosen view on the right as the stock Content
   Browser asset view, with its own columns, sort and filters. Double-click opens an asset; right-click gives the Content
@@ -18,8 +18,14 @@ What you get today (stage one):
 - **An MCP toolset** (`ContentViews.ContentViewsTools`) so AI agents can list views, read their typed columns and run
   them, getting rows back as JSON with each asset's path.
 
-Planned (stage two): a TEDS backend that shows each view as a Content Source. It is not built yet. See
-[docs/how-it-works.md](docs/how-it-works.md) and the first issue on this repository.
+- **A Content Source per view** (the TEDS backend, experimental): each view as a button in the Content Browser's
+  vertical source bar. It shows the view's rows in a TEDS table (or tiles) with a search box and a filter bar: the view's
+  own filters, on as it opens, and a *Has <column>* filter per column. Numbers sort as numbers. A provider that finds a
+  problem with an asset puts a TEDS alert on its row. New and deleted view assets add and remove their source while the
+  editor runs.
+
+**Project Settings > Plugins > Content Views > Backend** picks Legacy (the default), TEDS or Both. Both read the same
+view assets; the switch applies at once. See [docs/how-it-works.md](docs/how-it-works.md).
 
 Editor only. Nothing in this plugin reaches a cooked game.
 
@@ -37,7 +43,8 @@ Enable it for the editor only in your `.uproject`:
 { "Name": "ContentViews", "Enabled": true, "TargetAllowList": [ "Editor" ] }
 ```
 
-It enables the engine's experimental `ToolsetRegistry` plugin, which hosts the MCP toolset. Rebuild your editor target.
+It enables two of the engine's experimental plugins: `ToolsetRegistry`, which hosts the MCP toolset, and
+`EditorDataStorageFeatures` (TEDS), which the TEDS backend draws with. Rebuild your editor target.
 
 ## Five-minute quick start
 
@@ -67,8 +74,14 @@ are small providers registered by name; see [docs/how-it-works.md](docs/how-it-w
 ## Tests
 
 `ContentViews.*` automation tests run in an editor: a view over a class and its Blueprint children with typed values,
-every filter operator, validation, and the `RunView` tool called through the toolset registry the way MCP calls it.
+every filter operator, validation, the `RunView` tool called through the toolset registry the way MCP calls it, and a new
+view and an unsaved new row reaching an open tab. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
+the same rows and values, a number column sorted by TEDS's own sorter, a value filter as the filter bar runs it, a
+provider's alert, the backend switch, and a new view and row appearing while the editor runs. TEDS is off in
+commandlets, so run them in an editor (`-ExecCmds="Automation RunTests ContentViews"`), not with `-run=`.
 
 ## Status
 
-Stage one (the legacy Content Browser backend and the MCP toolset) is built. Stage two (TEDS) is planned.
+Both stages are built: the legacy Content Browser backend with the MCP toolset, and the TEDS backend. The TEDS backend
+sits on experimental engine APIs (Content Sources, TEDS asset data, the TEDS table viewer) that change between engine
+versions; it is written against Unreal Engine 5.8.4.

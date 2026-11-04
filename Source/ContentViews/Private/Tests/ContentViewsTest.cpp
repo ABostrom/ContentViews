@@ -327,4 +327,35 @@ bool FContentViewsContextMenuTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * Situation: an open Content Views tab while a new view asset and a new row asset (in memory, never saved) are made.
+ * Why it matters: a view is a new asset and no code; a designer who makes one, or a new asset of its class, expects to see
+ * it at once.
+ * Pass: the tab lists the new view as soon as it exists, and the view's rows hold the new row with its tag value.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsLiveTest,
+	"ContentViews.ANewViewAndANewRowAppearInTheOpenTab",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsLiveTest::RunTest(const FString& Parameters)
+{
+	FContentViewsTestRows Rows;
+	const TSharedRef<SContentViewsTab> Tab = SNew(SContentViewsTab);
+	TestTrue(TEXT("the open tab lists the fixture's view"), Tab->GetListedViews().Contains(FSoftObjectPath(Rows.View)));
+
+	UPackage* Package = CreatePackage(*(Rows.Folder / TEXT("CV_ContentViewsTestSecond")));
+	UContentViewDefinition* Second = NewObject<UContentViewDefinition>(Package, TEXT("CV_ContentViewsTestSecond"), RF_Public | RF_Standalone);
+	Second->RowClass = UContentViewsTestRow::StaticClass();
+	Second->Columns = {TEXT("Name"), TEXT("Speed")};
+	Rows.Register(Second);
+	TestTrue(TEXT("the open tab lists the new view at once"), Tab->GetListedViews().Contains(FSoftObjectPath(Second)));
+
+	Rows.MakeRow(TEXT("Row_New"), 77.f, TEXT("Gold"), false, TEXT(""));
+	const TArray<FContentViewRow> Found = UE::ContentViews::RunView(*Second, {}, FContentViewSort(), 0);
+	const FContentViewRow* New = Found.FindByPredicate([](const FContentViewRow& Row) { return Row.AssetPath.EndsWith(TEXT("Row_New.Row_New")); });
+	TestTrue(TEXT("the unsaved row is a row of the new view with its Speed"),
+		New && New->Values.FindChecked(TEXT("Speed")).Number == 77.0);
+	return true;
+}
+
 #endif

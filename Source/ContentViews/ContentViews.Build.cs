@@ -13,6 +13,7 @@ public class ContentViews : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"AssetRegistry",
+			"DeveloperSettings",
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

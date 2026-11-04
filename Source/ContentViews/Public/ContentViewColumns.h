@@ -5,6 +5,16 @@
 
 struct FAssetData;
 
+/** How a backend draws a column's values. */
+enum class EContentViewColumnShows : uint8
+{
+	/** The value's words. */
+	Text,
+
+	/** A colour chip: the value is #RRGGBB, or a comma list of them (the first is drawn). */
+	Colour,
+};
+
 /**
  * A column a view can list by name. Reads its value from the asset's registry data only, never by loading the asset.
  * A view's column with no registered provider reads the registry tag of that name.
@@ -21,6 +31,8 @@ public:
 
 	/** The column header's tooltip. */
 	virtual FText GetTooltip() const { return FText::GetEmpty(); }
+
+	virtual EContentViewColumnShows GetShows() const { return EContentViewColumnShows::Text; }
 };
 
 namespace UE::ContentViews
@@ -38,7 +50,8 @@ namespace UE::ContentViews
 
 	/** A column from a function, for computed columns registered in project code. */
 	CONTENTVIEWS_API TSharedRef<const IContentViewColumn> MakeColumn(TOptional<EContentViewValueType> Type,
-		TFunction<FContentViewValue(const FAssetData&)> Read, FText Tooltip = FText::GetEmpty());
+		TFunction<FContentViewValue(const FAssetData&)> Read, FText Tooltip = FText::GetEmpty(),
+		EContentViewColumnShows Shows = EContentViewColumnShows::Text);
 
 	/** The registry tag Tag of Asset as a value (FContentViewValue::FromTagString), localised text as its words. */
 	CONTENTVIEWS_API FContentViewValue ReadTag(const FAssetData& Asset, FName Tag);

@@ -2,7 +2,7 @@
 
 This is the engineer's tour of the plugin: what a view asset holds, where column values come from, how the legacy
 backend draws a view with the stock Content Browser widgets, why nothing is loaded, what the MCP toolset returns, and
-what the planned TEDS backend will change. Everything here describes code in this repository unless it says *planned*.
+how the TEDS backend shows the same views as Content Sources. Everything here describes code in this repository.
 
 ## The view asset
 
@@ -185,17 +185,136 @@ its full path so an agent can open or edit it:
 
 A bad filter, an unknown view or a column no row carries is refused with a script error naming it.
 
-## The TEDS backend (planned)
+## The TEDS backend
 
-Stage two is not built. The plan (see the repository's first issue): one generic TEDS `IContentSource` that registers a
-Content Source per view asset, registry tags as dynamic string columns with typed columns where a provider exists,
-computed columns as gated processors rather than per-frame work over every row, and filters compiled to `FTedsFilter`.
-A project setting would pick the backend. TEDS is experimental and its API moves between engine versions, so every TEDS
-call is meant to sit behind one module boundary, with an automation test per view so an engine upgrade that breaks it
-fails a gate.
+TEDS (the editor's Typed Element Data Storage) is a column store the editor keeps beside the asset registry: rows, each
+a set of typed columns, with queries, processors and widgets that read them. Its asset data feature mirrors every
+asset's `FAssetData` into a row without loading the asset. The TEDS backend tags those rows with the views they belong
+to, writes each view column into a typed TEDS column, and shows each view as a Content Source: a button in the Content
+Browser's vertical source bar that swaps the asset view for a TEDS table.
+
+Every TEDS call is in one module, `ContentViewsTeds`, which depends on `TypedElementFramework`, `TedsUI`, `TedsAlerts`,
+`TedsAssetData`, `TedsQueryStack` and `TedsTableViewer`. The legacy module `ContentViews` never sees TEDS. When the
+engine moves TEDS's API, this module is what breaks, and its tests say so.
+
+**The switch.** `UContentViewsSettings` (Project Settings > Plugins > Content Views) holds `Backend`: Legacy (the
+default), TEDS or Both. The legacy tab's menu entry and the frontend filters read it each time they are built; the TEDS
+backend listens to the setting's change event and registers or removes its sources at once. The engine hides the source
+bar unless `ContentBrowser.UI.ShowContentSourcesBar` is on, so the backend turns it on while it is active.
+
+**Start.** TEDS finds every `UEditorDataStorageFactory` subclass once the editor has loaded its modules.
+`UContentViewsTedsFactory` registers one processor, replaces the Content Source host widget, and starts the backend.
+
+**Which rows belong to a view.** Each view gets a tag type of its own, generated from a template with the view's object
+path as its identifier, so a query can ask for exactly that view's rows:
+
+```cpp
+State.RowTag = Storage->GenerateDynamicColumn({.TemplateType = FContentViewRowTag::StaticStruct(), .Identifier = FName(Path.ToString())});
+// ...
+return Select().ReadOnly<FAssetDataColumn_Experimental>().Where().All(RowTag).Compile();
+```
+
+Rows are tagged by the same `IsRowOf` the legacy backend uses, so a Blueprint is a row by its parent class tags.
+
+**Nothing runs every frame over every row.** TedsAssetData stamps `FUpdatedAssetDataTag` on a row for the frame its
+asset is added or changes. The backend's one processor matches only rows carrying that tag, and only notes them:
+
+```cpp
+DataStorage.RegisterQuery(
+	Select(
+		TEXT("Content Views: note changed asset rows"),
+		FProcessor(EQueryTickPhase::DuringPhysics, DataStorage.GetQueryTickGroupName(EQueryTickGroups::Update))
+			.SetExecutionMode(EExecutionMode::GameThread),
+		[](IQueryContext& Context, const RowHandle* Rows)
+		{
+			UE::ContentViews::Teds::FBackend::Get().NoteUpdatedRows(TConstArrayView<RowHandle>(Rows, Context.GetRowCount()));
+		})
+	.Where()
+		.All<FUpdatedAssetDataTag, FAssetDataColumn_Experimental>()
+	.Compile());
+```
+
+The work is done by a cooperative task (`RegisterCooperativeUpdate`), which TEDS runs in whatever time is left in a
+frame. It takes noted rows until its allowance is spent; for each it adds or removes each view's tag and writes that
+view's columns. A computed column reads other assets (which teams list a player), so after any change the task also
+queues every row of a view with computed columns and recomputes only those columns, within the same allowance. A new or
+changed asset therefore shows its registry tag columns as soon as its row is processed, and its computed columns on the
+pass after.
+
+**Columns by name.** The same providers as the legacy backend give each value. The TEDS column depends on what the
+provider says:
+
+| Provider | TEDS column |
+|---|---|
+| `Name` | TedsAssetData's own `FAssetNameColumn`, drawn as the Content Browser draws a name |
+| A number (declared, or a registry tag whose rows hold numbers) | `FContentViewNumberColumn` under the column's name: `double Value` with `meta=(Sortable)`, so TEDS's generated sorter sorts it as a number |
+| A computed string | `FContentViewStringColumn`: the value (a path, for a reference) and the words it shows |
+| Any other registry tag | the engine's `FItemStringAttributeColumn_Experimental` under the tag's name |
+| A provider made with `EContentViewColumnShows::Colour` | the stock `FSlateColorColumn`, drawn as the stock colour chip |
+
+The number column is a template that TEDS instantiates once per column name:
+
+```cpp
+USTRUCT(meta = (EditorDataStorage_DynamicColumnTemplate))
+struct FContentViewNumberColumn : public FEditorDataStorageColumn
+{
+	GENERATED_BODY()
+
+	UPROPERTY(meta = (Sortable))
+	double Value = 0.0;
+
+	UPROPERTY(meta = (Searchable))
+	FString Display;
+};
+```
+
+A generated type's display name would read `ContentViewNumberColumn::Speed`, so the backend sets each one's
+`DisplayName` to the column's name (`TeamColour` reads *Team Colour*) and registers a cell widget per column that shows
+the value's words.
+
+**Alerts.** A provider that cannot give a value can say why with `FContentViewValue::OfProblem`. The TEDS backend puts
+that on the row with the TEDS Alerts API, and a view with computed columns shows the alert column:
+
+```cpp
+Alerts::AddAlert(*Storage, Row, AlertName, Message, UE::Editor::DataStorage::Columns::FAlertColumnType::Warning);
+```
+
+**Filters and search.** A view's source shows an `STedsSearchBox` and an `STedsFilterBar` (with a `FilterBarIdentifier`
+per view, so its state is saved) over the view's rows. The view's own filters become predicate filters, on as it opens,
+and each runs the legacy backend's own test on the row's asset data, so both backends keep the same rows:
+
+```cpp
+return BuildConstQueryFunction<bool>([Store, Filter](TConstQueryContext<SingleRowInfo> Context)
+{
+	const FAssetDataColumn_Experimental* Asset = Store->GetColumn<FAssetDataColumn_Experimental>(Context.GetCurrentRow());
+	return Asset && PassesFilter(Asset->AssetData, Filter);
+});
+```
+
+Each column also gets a shape filter, *Has <column>*: a registered query for the rows whose table holds that column.
+
+**The host widget.** The engine draws an active Content Source with the widget registered for the purpose
+`ContentBrowser.AssetView`, and its own (in TedsContentBrowser) has no search box or filter bar. That purpose is unique
+by name, so the factory, ordered after the engine's, registers its own: a Content View's source gets the search box,
+filter bar and table or tiles; any other source gets the table the engine's host builds from that source's
+`GetAssetViewInitParams`. Each view source answers `GetAssetViewInitParams` too, so the engine's host would still show
+its rows and columns.
+
+**Sources after startup.** `IContentBrowserSingleton::RegisterContentSourceFactory` can be called at any time: it
+broadcasts `OnContentSourceFactoriesChanged`, and every Content Browser's source bar rebuilds. So a view asset made in
+the editor gets its source at once, a deleted one loses it, and an edited one is rebuilt: its source registers again
+and an open source rebuilds its table, filters and columns.
+
+**Experimental caveats.** TEDS, TedsAssetData and Content Sources are all experimental in Unreal Engine 5.8. The backend
+uses names that say so (`FAssetDataColumn_Experimental`, `FItemStringAttributeColumn_Experimental`) and a console
+variable the engine calls experimental, and the module builds with `bValidateExperimentalApi = false` because one TEDS
+header does not compile with that check on. TEDS is off in commandlets, so its tests run in an editor. Asset rows arrive
+over several frames after the registry's scan, so a source opened at startup fills in as they come. TEDS cells are
+read-only here: an asset row holds `FAssetData`, and writing a value back would mean loading the asset. The table has
+no double-click or right-click menu yet; the legacy tab has both.
 
 **Why both backends read one asset.** A view is a description of a table, not of a widget. Keeping rows, columns,
-sort and filters in one data asset means a view made today keeps working when the TEDS backend lands, and the MCP
+sort and filters in one data asset means a view made for one backend works in the other, and the MCP
 tools, the frontend filters and either backend all agree on what a view is.
 
 ## Limits

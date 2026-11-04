@@ -9,19 +9,21 @@ namespace
 	{
 	public:
 		FContentViewFunctionColumn(TOptional<EContentViewValueType> InType,
-			TFunction<FContentViewValue(const FAssetData&)> InRead, FText InTooltip)
-			: Type(InType), Read(MoveTemp(InRead)), Tooltip(MoveTemp(InTooltip))
+			TFunction<FContentViewValue(const FAssetData&)> InRead, FText InTooltip, EContentViewColumnShows InShows)
+			: Type(InType), Read(MoveTemp(InRead)), Tooltip(MoveTemp(InTooltip)), Shows(InShows)
 		{
 		}
 
 		virtual TOptional<EContentViewValueType> GetType() const override { return Type; }
 		virtual FContentViewValue GetValue(const FAssetData& Asset) const override { return Read(Asset); }
 		virtual FText GetTooltip() const override { return Tooltip; }
+		virtual EContentViewColumnShows GetShows() const override { return Shows; }
 
 	private:
 		TOptional<EContentViewValueType> Type;
 		TFunction<FContentViewValue(const FAssetData&)> Read;
 		FText Tooltip;
+		EContentViewColumnShows Shows;
 	};
 
 	/** The registry tag of the column's own name. */
@@ -75,9 +77,9 @@ namespace UE::ContentViews
 	}
 
 	TSharedRef<const IContentViewColumn> MakeColumn(TOptional<EContentViewValueType> Type,
-		TFunction<FContentViewValue(const FAssetData&)> Read, FText Tooltip)
+		TFunction<FContentViewValue(const FAssetData&)> Read, FText Tooltip, EContentViewColumnShows Shows)
 	{
-		return MakeShared<FContentViewFunctionColumn>(Type, MoveTemp(Read), MoveTemp(Tooltip));
+		return MakeShared<FContentViewFunctionColumn>(Type, MoveTemp(Read), MoveTemp(Tooltip), Shows);
 	}
 
 	FContentViewValue ReadTag(const FAssetData& Asset, FName Tag)
