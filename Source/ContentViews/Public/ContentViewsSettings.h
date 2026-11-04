@@ -17,8 +17,8 @@ enum class EContentViewsBackend : uint8
 	Both,
 };
 
-/** Project Settings > Plugins > Content Views. */
-UCLASS(config = Editor, defaultconfig, meta = (DisplayName = "Content Views"))
+/** Project Settings > Plugins > Content Views, saved in the project's DefaultEngine.ini. */
+UCLASS(config = Engine, defaultconfig, meta = (DisplayName = "Content Views"))
 class CONTENTVIEWS_API UContentViewsSettings : public UDeveloperSettings
 {
 	GENERATED_BODY()
