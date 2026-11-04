@@ -75,7 +75,7 @@ namespace UE::ContentViews::Teds
 
 	FQueryDescription FViewState::MakeRowQuery() const
 	{
-		return Select().ReadOnly<FAssetDataColumn_Experimental>().Where().All(RowTag).Compile();
+		return Select().ReadOnly<FAssetDataColumn_Experimental, FAssetNameColumn>().Where().All(RowTag).Compile();
 	}
 
 	FName FContentViewSource::GetName()

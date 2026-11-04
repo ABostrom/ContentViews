@@ -211,7 +211,7 @@ path as its identifier, so a query can ask for exactly that view's rows:
 ```cpp
 State.RowTag = Storage->GenerateDynamicColumn({.TemplateType = FContentViewRowTag::StaticStruct(), .Identifier = FName(Path.ToString())});
 // ...
-return Select().ReadOnly<FAssetDataColumn_Experimental>().Where().All(RowTag).Compile();
+return Select().ReadOnly<FAssetDataColumn_Experimental, FAssetNameColumn>().Where().All(RowTag).Compile();
 ```
 
 Rows are tagged by the same `IsRowOf` the legacy backend uses, so a Blueprint is a row by its parent class tags.
@@ -279,7 +279,8 @@ that on the row with the TEDS Alerts API, and a view with computed columns shows
 Alerts::AddAlert(*Storage, Row, AlertName, Message, UE::Editor::DataStorage::Columns::FAlertColumnType::Warning);
 ```
 
-**Filters and search.** A view's source shows an `STedsSearchBox` and an `STedsFilterBar` (with a `FilterBarIdentifier`
+**Filters and search.** A view's source shows an `STedsSearchBox` (it runs the view's query itself and searches the
+selected columns' `Searchable` fields, which is why the query selects the name column) and an `STedsFilterBar` (with a `FilterBarIdentifier`
 per view, so its state is saved) over the view's rows. The view's own filters become predicate filters, on as it opens,
 and each runs the legacy backend's own test on the row's asset data, so both backends keep the same rows:
 
@@ -304,6 +305,9 @@ its rows and columns.
 broadcasts `OnContentSourceFactoriesChanged`, and every Content Browser's source bar rebuilds. So a view asset made in
 the editor gets its source at once, a deleted one loses it, and an edited one is rebuilt: its source registers again
 and an open source rebuilds its table, filters and columns.
+
+**A quick look.** `ContentViews.OpenSource <view> [width height]` opens a view's source widget, the one the Content
+Browser hosts, in a window of its own.
 
 **Experimental caveats.** TEDS, TedsAssetData and Content Sources are all experimental in Unreal Engine 5.8. The backend
 uses names that say so (`FAssetDataColumn_Experimental`, `FItemStringAttributeColumn_Experimental`) and a console

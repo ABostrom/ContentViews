@@ -25,7 +25,6 @@ private:
 
 	FSoftObjectPath ViewPath;
 	TArray<UE::Editor::DataStorage::QueryHandle> FilterQueries;
-	TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Rows;
 	TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Searched;
 	TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Filtered;
 };

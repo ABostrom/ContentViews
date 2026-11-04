@@ -7,8 +7,11 @@
 #include "Elements/Interfaces/TypedElementDataStorageUiInterface.h"
 #include "Filters/FilterBase.h"
 #include "TedsAssetDataColumns.h"
+#include "TedsAssetDataWidgetColumns.h"
+#include "Styling/AppStyle.h"
 #include "TedsFilter.h"
 #include "TedsQueryNode.h"
+#include "TedsQuerySearchNode.h"
 #include "TedsQueryStackExecutor.h"
 #include "TedsRowFilterNode.h"
 #include "TedsRowQueryResultsNode.h"
@@ -74,9 +77,13 @@ void SContentViewsSource::Build()
 		return;
 	}
 
-	Rows = MakeShared<QueryStack::FRowQueryResultsNode>(*Storage, MakeShared<QueryStack::FQueryNode>(*Storage, State->MakeRowQuery()),
-		QueryStack::FRowQueryResultsNode::ESyncActions::RefreshOnUpdate);
-	const TSharedRef<STedsSearchBox> SearchBox = SNew(STedsSearchBox).InSearchableRowNode(Rows).OutSearchNode(&Searched);
+	UE_LOG(LogTemp, Display, TEXT("Content Views: source %s opens on %d rows (caught up: %d)"), *ViewPath.GetAssetName(),
+		Backend.RowsOf(*State).Num(), Backend.IsCaughtUp() ? 1 : 0);
+	// The search box runs the view's query itself and searches its selected columns' Searchable fields (the name).
+	const TSharedRef<STedsSearchBox> SearchBox = SNew(STedsSearchBox)
+		.InSearchableQueryNode(MakeShared<QueryStack::FQueryNode>(*Storage, State->MakeRowQuery()))
+		.InSearchableQueryFlags(QueryStack::FQuerySearchNode::ESyncActions::RefreshOnUpdate)
+		.OutSearchNode(&Searched);
 
 	// The view's own filters, on as it opens, as the legacy backend applies them; then a shape filter per column.
 	TArray<TSharedPtr<FTedsFilter>> Filters;
@@ -111,11 +118,21 @@ void SContentViewsSource::Build()
 	TSharedPtr<SWidget> Body;
 	if (View->Mode == EContentViewMode::Tiles)
 	{
-		Body = SNew(STedsTileViewer)
+		// The Content Browser's own tile (thumbnail and name), sized as its tile view sizes it.
+		constexpr float ThumbnailSize = 128.f;
+		const TSharedRef<STedsTileViewer> Tiles = SNew(STedsTileViewer)
 			.QueryStack(Filtered)
 			.WidgetPurpose(IUiProvider::FPurposeInfo("ContentBrowser", "TileLabel", NAME_None).GeneratePurposeID())
-			.Columns(State->ShownColumns())
+			.TileStyle(&FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("ContentBrowser.AssetListView.TileTableRow"))
+			.ItemAlignment(EListItemAlignment::LeftAligned)
+			.ItemWidth(ThumbnailSize + 16.f)
+			.ItemHeight(ThumbnailSize + 64.f)
 			.SelectionMode(ESelectionMode::Multi);
+		const RowHandle TileRow = Tiles->GetWidgetRowHandle();
+		Storage->AddColumn(TileRow, FThumbnailSizeColumn_Experimental{.ThumbnailSize = EThumbnailSize::Medium});
+		Storage->AddColumn(TileRow, FSizeValueColumn_Experimental{.SizeValue = ThumbnailSize});
+		Storage->AddColumn(TileRow, FThumbnailEditModeColumn_Experimental{.IsEditModeToggled = false});
+		Body = Tiles;
 	}
 	else
 	{
