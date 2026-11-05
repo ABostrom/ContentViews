@@ -46,7 +46,35 @@ Enable it for the editor only in your `.uproject`:
 It enables two of the engine's experimental plugins: `ToolsetRegistry`, which hosts the MCP toolset, and
 `EditorDataStorageFeatures` (TEDS), which the TEDS backend draws with. Rebuild your editor target.
 
-## Five-minute quick start
+## Quick start: the Heavy Meshes example
+
+The plugin ships one example view, `/ContentViews/Examples/CV_HeavyMeshes` (*Heavy Meshes (example)*). Its rows are every
+`UStaticMesh` in the project, and it needs no code at all, because the engine already writes each mesh's facts as
+registry tags (`UStaticMesh::GetAssetRegistryTags`):
+
+| Column | Tag | |
+|---|---|---|
+| Name | | |
+| Triangles | `Triangles` | sorted on, highest first |
+| Vertices | `Vertices` | |
+| Nanite | `NaniteEnabled` | labelled through *Column Labels* |
+| LODs | `LODs` | |
+| Materials | `Materials` | |
+| Collision Prims | `CollisionPrims` | |
+| Est. Compressed Size | `EstTotalCompressedSize` | bytes, labelled |
+
+Its filters are `Triangles >= 10000` and `NaniteEnabled = False`: the meshes that are heavy and not Nanite. The
+threshold is the first filter's *Value* on the view asset. Edit it and an open view follows at once. Numbers sort as
+numbers in both backends.
+
+1. Open it: **Tools > Content Views**, then *Heavy Meshes (example)*, or `ContentViews.Open "Heavy Meshes (example)"`.
+   With the TEDS backend on, it is also a button in the Content Browser's source bar.
+2. Double-click a row to open the mesh. Right-click a row for the Content Browser's asset menu.
+3. To make your own, duplicate the asset and change it. The rest of this page does that from scratch.
+
+![Heavy Meshes as a TEDS Content Source, filtered to engine content](docs/images/heavy-meshes-teds.png)
+
+## Five-minute quick start: a view of your own class
 
 1. **Make a field visible to the registry.** On the class whose assets you want to browse, mark the fields
    `AssetRegistrySearchable`:

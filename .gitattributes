@@ -1,0 +1,3 @@
+# The example views are a few KB: plain binary, so the plugin repo needs no LFS.
+*.uasset !filter !diff !merge binary
+*.umap !filter !diff !merge binary

@@ -493,6 +493,7 @@ bool FContentViewsTedsColourTest::RunTest(const FString& Parameters)
 			return;
 		}
 		TestEqual(TEXT("its header"), Slot->Type->GetMetaData(TEXT("DisplayName")), FString(TEXT("Crew Colour")));
+		TestEqual(TEXT("its kind"), Slot->Kind, UE::ContentViews::Teds::EColumnKind::Colour);
 		for (const FContentViewRow& Row : UE::ContentViews::Teds::ReadRows(*Rows->View))
 		{
 			if (Row.AssetPath.EndsWith(TEXT("Row_Fast.Row_Fast")))
@@ -501,6 +502,114 @@ bool FContentViewsTedsColourTest::RunTest(const FString& Parameters)
 			}
 		}
 	});
+	return true;
+}
+
+namespace
+{
+	double TedsTestTriangles(const FAssetData& Mesh)
+	{
+		return UE::ContentViews::ReadTag(Mesh, TEXT("Triangles")).Number;
+	}
+
+	/** Every row of View as the legacy backend gives it is at or above Threshold, not Nanite, and in descending order. */
+	void TedsTestCheckHeavy(FAutomationTestBase& Test, const UContentViewDefinition& View, double Threshold, const TCHAR* When)
+	{
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
+		const TArray<FContentViewRow> Rows = UE::ContentViews::RunView(View, {}, FContentViewSort(), 0);
+		Test.TestTrue(*FString::Printf(TEXT("%s: some mesh is that heavy"), When), Rows.Num() > 0);
+		double Last = TNumericLimits<double>::Max();
+		for (const FContentViewRow& Row : Rows)
+		{
+			const double Triangles = Row.Values.FindChecked(TEXT("Triangles")).Number;
+			Test.TestTrue(*FString::Printf(TEXT("%s: %s has %.0f triangles, at least %.0f"), When, *Row.AssetPath, Triangles, Threshold), Triangles >= Threshold);
+			Test.TestTrue(*FString::Printf(TEXT("%s: %s in descending order"), When, *Row.AssetPath), Triangles <= Last);
+			Test.TestFalse(*FString::Printf(TEXT("%s: %s is not Nanite"), When, *Row.AssetPath), Row.Values.FindChecked(TEXT("NaniteEnabled")).bBool);
+			Last = Triangles;
+		}
+		const TArray<FString> Teds = UE::ContentViews::Teds::SortRows(View, TEXT("Triangles"), /*bDescending*/ true);
+		Last = TNumericLimits<double>::Max();
+		bool bOrdered = true;
+		for (const FString& Path : Teds)
+		{
+			const double Triangles = TedsTestTriangles(Registry.GetAssetByObjectPath(FSoftObjectPath(Path)));
+			bOrdered &= Triangles <= Last;
+			Last = Triangles;
+		}
+		Test.TestTrue(*FString::Printf(TEXT("%s: TEDS sorts the meshes by triangles as numbers"), When), bOrdered && Teds.Num() >= Rows.Num());
+	}
+}
+
+/**
+ * Situation: the plugin's Heavy Meshes example (non-Nanite static meshes at or above a triangle count, heaviest first),
+ * copied with a threshold of 1000, then edited to 5000 while its Content Source is open.
+ * Why it matters: the threshold is a field on the view asset, so a designer tunes the view by editing it; an open view
+ * that keeps the old rows tells him the wrong thing.
+ * Pass: every row is at or above the threshold, not Nanite and in descending order in both backends; after the edit the
+ * open source rebuilds, and its filter bar and the legacy backend keep only meshes at or above 5000.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsHeavyMeshesTest,
+	"ContentViews.Teds.HeavyMeshesKeepsMeshesAtItsThresholdAndFollowsAnEdit",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsHeavyMeshesTest::RunTest(const FString& Parameters)
+{
+	const UContentViewDefinition* Shipped = LoadObject<UContentViewDefinition>(nullptr, TEXT("/ContentViews/Examples/CV_HeavyMeshes.CV_HeavyMeshes"));
+	if (!TestNotNull(TEXT("the shipped Heavy Meshes view"), Shipped) || !TestEqual(TEXT("its filters"), Shipped->Filters.Num(), 2))
+	{
+		return false;
+	}
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	UPackage* Package = CreatePackage(*(Rows->Folder / TEXT("CV_HeavyMeshesCopy")));
+	UContentViewDefinition* Heavy = DuplicateObject<UContentViewDefinition>(Shipped, Package, TEXT("CV_HeavyMeshesCopy"));
+	Heavy->SetFlags(RF_Public | RF_Standalone);
+	Heavy->DisplayName = FText::FromString(TEXT("CV_HeavyMeshesCopy"));
+	Heavy->Filters[0].Value = TEXT("1000");
+	Rows->Register(Heavy);
+
+	const double Start = FPlatformTime::Seconds();
+	AddCommand(new FFunctionLatentCommand([this, Heavy, Start]()
+	{
+		const bool bReady = UE::ContentViews::Teds::IsCaughtUp() && UE::ContentViews::Teds::FBackend::Get().FindView(FSoftObjectPath(Heavy));
+		if (!bReady && FPlatformTime::Seconds() - Start < 120.0)
+		{
+			return false;
+		}
+		TedsTestCheckHeavy(*this, *Heavy, 1000.0, TEXT("at 1000"));
+		return true;
+	}));
+	AddCommand(new FFunctionLatentCommand([this, Rows, Heavy]()
+	{
+		const TSharedRef<SContentViewsSource> Open = SNew(SContentViewsSource, FSoftObjectPath(Heavy));
+		const TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Before = Open->GetShownRows();
+		Heavy->Filters[0].Value = TEXT("5000");
+		FPropertyChangedEvent Changed(nullptr);
+		FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Heavy, Changed);
+		TestTrue(TEXT("the open source rebuilt"), Open->GetShownRows() != Before);
+		TedsTestCheckHeavy(*this, *Heavy, 5000.0, TEXT("at 5000"));
+
+		using namespace UE::Editor::DataStorage;
+		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
+		QueryStack::FExplicitUpdateExecutor Executor(TEXT("ContentViewsTest"), Open->GetShownRows());
+		for (int32 Pass = 0; Pass < 200; ++Pass)
+		{
+			Executor.Update();
+		}
+		int32 Shown = 0;
+		bool bAllHeavy = true;
+		for (const RowHandle Row : Open->GetShownRows()->GetRows())
+		{
+			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
+			{
+				++Shown;
+				bAllHeavy &= TedsTestTriangles(Asset->AssetData) >= 5000.0;
+			}
+		}
+		TestEqual(TEXT("the source's filter bar keeps what the legacy backend keeps"), Shown,
+			UE::ContentViews::RunView(*Heavy, {}, FContentViewSort(), 0).Num());
+		TestTrue(TEXT("and only meshes at or above 5000"), bAllHeavy);
+		return true;
+	}));
 	return true;
 }
 
