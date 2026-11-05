@@ -23,6 +23,11 @@ What you get:
   own filters, on as it opens, and a *Has <column>* filter per column. Numbers sort as numbers. A provider that finds a
   problem with an asset puts a TEDS alert on its row. New and deleted view assets add and remove their source while the
   editor runs.
+  Double-click opens a row's asset; right-click gives the same asset menu as the tab.
+- **Scene Cost** (TEDS, the Join archetype): the static meshes placed in the level open in the editor, with how many
+  times each is placed (instanced components by their instances), its triangles, the triangles it puts in the scene and
+  its estimated size, an alert on a non-Nanite mesh over a budget, and each mesh's placements with *Select in Level*
+  and *Frame*. It updates as actors are placed or deleted and as PCG regenerates. Example: `/ContentViews/Examples/CV_SceneCost`.
 
 **Project Settings > Plugins > Content Views > Backend** picks Legacy (the default), TEDS or Both. Both read the same
 view assets; the switch applies at once. See [docs/how-it-works.md](docs/how-it-works.md).
@@ -72,7 +77,9 @@ numbers in both backends.
 2. Double-click a row to open the mesh. Right-click a row for the Content Browser's asset menu.
 3. To make your own, duplicate the asset and change it. The rest of this page does that from scratch.
 
-![Heavy Meshes as a TEDS Content Source, filtered to engine content](docs/images/heavy-meshes-teds.png)
+![Heavy Meshes as a TEDS Content Source](docs/images/heavy-meshes-teds.png)
+
+*Heavy Meshes as a Content Source, with its threshold at 1000 and an extra filter, Plugin = Engine, so the capture shows engine content only.*
 
 ## Five-minute quick start: a view of your own class
 
@@ -105,11 +112,11 @@ are small providers registered by name; see [docs/how-it-works.md](docs/how-it-w
 every filter operator, validation, the `RunView` tool called through the toolset registry the way MCP calls it, and a new
 view and an unsaved new row reaching an open tab. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
 the same rows and values, a number column sorted by TEDS's own sorter, a value filter as the filter bar runs it, a
-provider's alert, the backend switch, and a new view and row appearing while the editor runs. TEDS is off in
+provider's alert, the backend switch, a new view and row appearing while the editor runs, double-click and the right-click menu, tiles in the default sort, a colour column named for itself, Heavy Meshes' threshold and a live edit of it, and Scene Cost counting placed, deleted and instanced meshes (including instances added with no `Modify`, as PCG adds them) and its budget alert. TEDS is off in
 commandlets, so run them in an editor (`-ExecCmds="Automation RunTests ContentViews"`), not with `-run=`.
 
 ## Status
 
-Both stages are built: the legacy Content Browser backend with the MCP toolset, and the TEDS backend. The TEDS backend
+Both stages are built: the legacy Content Browser backend with the MCP toolset, and the TEDS backend. The first view archetype beyond assets, Join (Scene Cost), is built on TEDS; the rest of the roadmap is issue #2. The TEDS backend
 sits on experimental engine APIs (Content Sources, TEDS asset data, the TEDS table viewer) that change between engine
 versions; it is written against Unreal Engine 5.8.4.

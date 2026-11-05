@@ -2,13 +2,15 @@
 
 This is the engineer's tour of the plugin: what a view asset holds, where column values come from, how the legacy
 backend draws a view with the stock Content Browser widgets, why nothing is loaded, what the MCP toolset returns, and
-how the TEDS backend shows the same views as Content Sources. Everything here describes code in this repository.
+how the TEDS backend shows the same views as Content Sources, and how Scene Cost joins assets with the level open in the editor. Everything here describes code in this repository.
 
 ## The view asset
 
-A view is a `UContentViewDefinition` (`Source/ContentViews/Public/ContentViewDefinition.h`), a `UPrimaryDataAsset`
-with its own primary asset type, `ContentView`. The module registers that type with the Asset Manager as editor-only,
-scanning `/Game`, so a cook never takes a view.
+A view is a `UContentViewDefinition` (`Source/ContentViews/Public/ContentViewDefinition.h`). Every view class derives
+from `UContentViewBase`, a `UPrimaryDataAsset` that holds `DisplayName` and `Icon` and has its own primary asset type,
+`ContentView`. The module registers that type with the Asset Manager as editor-only, scanning `/Game`, so a cook never
+takes a view. `UContentViewDefinition` is the asset archetype: its rows are assets. Scene Cost (below) is a second
+archetype, `USceneCostView`, whose rows are the meshes placed in the open level.
 
 | Field | What it does |
 |---|---|
@@ -17,6 +19,7 @@ scanning `/Game`, so a cook never takes a view.
 | `RowClass` | The class whose assets are the rows (a soft class, so a Blueprint class works too). |
 | `bIncludeSubclasses` | Whether assets of subclasses and Blueprint children are rows. On by default. |
 | `Columns` | Column names, left to right. |
+| `ColumnLabels` | A header for a column whose name does not read well (`NaniteEnabled` as *Nanite*). Others read their name in words. |
 | `DefaultSort` | A column and a direction. None sorts by name. |
 | `Filters` | `FContentViewFilter` rows: column, operator (`=`, `!=`, `>=`, `<=`, `contains`, `has tag`), value. A row must meet all of them. |
 | `Mode` | List (a column view) or Tiles (thumbnails). |
@@ -30,6 +33,11 @@ MCP tool refuses a bad filter with, so the editor and an agent hear the same rea
 
 `ToSpec()` returns the definition as a plain `FContentViewSpec` struct and `ExportJson()` writes that as JSON. Creating
 a view from JSON is planned, not built.
+
+**The shipped example.** `/ContentViews/Examples/CV_HeavyMeshes` has `UStaticMesh` as its row class. Its columns are the
+engine's own mesh tags (`Triangles`, `Vertices`, `NaniteEnabled`, `LODs`, `Materials`, `CollisionPrims`,
+`EstTotalCompressedSize`, all written by `UStaticMesh::GetAssetRegistryTags`). Its filters are `Triangles >= 10000` and
+`NaniteEnabled = False`, and it sorts by `Triangles`, highest first. It needs no code.
 
 ## Which assets are rows
 
@@ -120,9 +128,11 @@ widget the Content Browser's asset view is made of, so it looks and behaves like
 - `InitialAssetViewType` is the column view for List and the tile view for Tiles.
 - The picker has no option for its starting sort, so the tab finds the picker's `SAssetView` in its widget tree and calls
   `SetSortParameters` with the view's default sort.
-- Double-click opens the asset's editor. Right-click builds the Content Browser's registered
-  `ContentBrowser.AssetContextMenu.<Class>` menu for the selection, with Edit, Browse to Asset and Copy Reference in
-  front. The Content Browser's own common section (rename, delete, duplicate) is private to it, so it is not there.
+- Double-click opens the asset's editor (`UE::ContentViews::OpenAssets`). Right-click builds the Content Browser's
+  registered `ContentBrowser.AssetContextMenu.<Class>` menu for the selection (`UE::ContentViews::MakeAssetContextMenu`,
+  `Public/ContentViewAssetActions.h`), with Edit, Browse to Asset and Copy Reference in front. It passes every context
+  and command list the Content Browser's own menu passes, because extenders read them unchecked. The Content Browser's
+  own common section (rename, delete, duplicate) is private to it, so it is not there.
 
 **Frontend filters.** `UContentViewsFilterExtension` is a `UContentBrowserFrontEndFilterExtension`. When a Content
 Browser builds its filter list, it adds one `FFrontendFilter` per view under a *Content Views* category. The filter
@@ -250,7 +260,7 @@ provider says:
 | A number (declared, or a registry tag whose rows hold numbers) | `FContentViewNumberColumn` under the column's name: `double Value` with `meta=(Sortable)`, so TEDS's generated sorter sorts it as a number |
 | A computed string | `FContentViewStringColumn`: the value (a path, for a reference) and the words it shows |
 | Any other registry tag | the engine's `FItemStringAttributeColumn_Experimental` under the tag's name |
-| A provider made with `EContentViewColumnShows::Colour` | the stock `FSlateColorColumn`, drawn as the stock colour chip |
+| A provider made with `EContentViewColumnShows::Colour` | `FContentViewColourColumn` under the column's name, drawn as a colour chip |
 
 The number column is a template that TEDS instantiates once per column name:
 
@@ -269,8 +279,20 @@ struct FContentViewNumberColumn : public FEditorDataStorageColumn
 ```
 
 A generated type's display name would read `ContentViewNumberColumn::Speed`, so the backend sets each one's
-`DisplayName` to the column's name (`TeamColour` reads *Team Colour*) and registers a cell widget per column that shows
-the value's words.
+`DisplayName` to the column's header (its label, else `TeamColour` reads *Team Colour*). It registers a cell widget per
+column that shows the value's words, and a header widget under its own purpose, `ContentViews.Header`, which falls back
+to `General.Header`. The header makes the name column three times as wide, so names are not cut short. A colour column
+used to be the stock `FSlateColorColumn`. That column's header always reads "Color" and a row can hold only one, so a
+colour column is now a template of its own, like the others.
+
+**Rows act like the Content Browser's.** A TEDS table and tile viewer bind their list's double-click and context menu to
+two columns on the viewer's widget row, `FWidgetDoubleClickedColumn` and `FWidgetContextMenuColumn`. The source fills
+them: double-click calls `OpenAssets` on the row's asset, and right-click calls `MakeAssetContextMenu` on the selection.
+That is the same menu as the legacy tab, with every context and command list.
+
+**Tiles keep the view's sort.** A tile viewer has no header to click, so the source puts the default sort into the
+tiles' query stack: an `FRowSortNode` with the column's generated sorter, then an `FRowOrderInversionNode` when the
+sort is descending.
 
 **Alerts.** A provider that cannot give a value can say why with `FContentViewValue::OfProblem`. The TEDS backend puts
 that on the row with the TEDS Alerts API, and a view with computed columns shows the alert column:
@@ -314,8 +336,130 @@ uses names that say so (`FAssetDataColumn_Experimental`, `FItemStringAttributeCo
 variable the engine calls experimental, and the module builds with `bValidateExperimentalApi = false` because one TEDS
 header does not compile with that check on. TEDS is off in commandlets, so its tests run in an editor. Asset rows arrive
 over several frames after the registry's scan, so a source opened at startup fills in as they come. TEDS cells are
-read-only here: an asset row holds `FAssetData`, and writing a value back would mean loading the asset. The table has
-no double-click or right-click menu yet; the legacy tab has both.
+read-only here: an asset row holds `FAssetData`, and writing a value back would mean loading the asset.
+
+## Scene Cost: assets joined with the open level
+
+The Content Browser can tell you what a mesh is. It cannot tell you what the mesh costs in the level you have open:
+how many times it is placed, how many triangles that puts in the scene, and whether that is a problem. Scene Cost
+answers that. It is the first view of the Join archetype, rows that are assets joined with world counts, and it is
+TEDS-only, because the counts come from TEDS's actor and component rows.
+
+![Scene Cost on a level built from engine shapes](images/scene-cost-example.png)
+
+```
+Scene Cost (example) > L_SceneCostExample (loaded: 57 actors)    Non-Nanite budget (scene triangles) [1000000]
+Mesh      | Placed | Triangles | Scene Tris v | Nanite | Est. Memory | Alerts
+Sphere    |     10 |       960 |        9,600 | No     | -           |
+Cylinder  |      6 |       512 |        3,072 | No     | -           |
+Cone      |      6 |       284 |        1,704 | No     | -           |
+Cube      |     24 |        48 |        1,152 | No     | -           |
+Plane     |      1 |         2 |            2 | No     | -           |
+Placements of Sphere . 10 instances in 10 components                      [Select in Level] [Frame]
+Actor | Component | Kind | Instances | Cell
+5 meshes . 47 instances in 47 components . 15.5K scene triangles . 100% not Nanite
+```
+
+The capture and the block above come from a level of engine basic shapes (a plane, 24 cubes, 10 spheres, 6 cylinders
+and 6 cones as static mesh actors). The engine's basic shapes carry no compressed-size tag, so *Est. Memory* reads `-`.
+In a project's own level the same view counts every placed mesh, instanced components by their instances.
+
+**The view asset.** `USceneCostView` (`Source/ContentViewsTeds/Public/SceneCostView.h`) derives from `UContentViewBase`,
+so it has a display name and an icon. It adds one field, `TriangleBudget`: a mesh that is not Nanite and puts more
+triangles than this in the scene gets an alert. The plugin ships one, `/ContentViews/Examples/CV_SceneCost`. Each Scene
+Cost view is a Content Source, like an asset view.
+
+**Placements come from component rows.** TEDS keeps a row for every actor and component in an editor world
+(TedsActorCompatibility registers an actor's components once the actor's row syncs). A row carries
+`FTypedElementSyncFromWorldTag` for one frame when its object is added, loaded or modified. One processor matches rows
+with that tag, keeps the static mesh components, and only notes them:
+
+```cpp
+DataStorage.RegisterQuery(
+	Select(
+		TEXT("Content Views: note synced static mesh components"),
+		FProcessor(EQueryTickPhase::DuringPhysics, DataStorage.GetQueryTickGroupName(EQueryTickGroups::Update))
+			.SetExecutionMode(EExecutionMode::GameThread),
+		[](IQueryContext& Context, const RowHandle* Rows, const FTypedElementUObjectColumn* Objects)
+		{
+			// ... Cast<UStaticMeshComponent>(Objects[Index].Object.Get()) ...
+			Backend.NoteComponentRows(Components);
+		})
+	.Where()
+		.All<FTypedElementSyncFromWorldTag>()
+	.Compile());
+```
+
+The backend's cooperative task (the same `RegisterCooperativeUpdate` task as the asset rows) reads each noted
+component and writes an `FContentViewPlacementColumn` on its row: the mesh, the instances it draws (an instanced or
+hierarchical instanced component's instance count, else 1), the world and the owning actor. It removes the column when
+the component no longer places a mesh in an editor world. An observer on that column's removal notes when a component
+row goes away, for example when the actor is deleted, its cell unloads, or garbage collection runs:
+
+```cpp
+DataStorage.RegisterQuery(
+	Select(
+		TEXT("Content Views: a placement went"),
+		FObserver::OnRemove<FContentViewPlacementColumn>().SetExecutionMode(EExecutionMode::GameThread),
+		[](IQueryContext& Context, RowHandle Row, const FContentViewPlacementColumn& Placement)
+		{
+			UE::ContentViews::Teds::FBackend::Get().NoteSceneChanged();
+		})
+	.Compile());
+```
+
+**The one registration TEDS needed.** An instanced component's instance count can change with no sync tag. PCG adds
+and clears instances with `AddInstances` and `ClearInstances`, which do not call `Modify`. A component PCG creates
+mid-generation can also miss the engine's own component registration, which runs on the owning actor's row. The engine
+does report every instance change through `FInstancedStaticMeshDelegates::OnInstanceIndexUpdated`. The backend listens
+to that delegate for editor worlds. On the next cooperative pass it notes the component's row, or registers the
+component with TEDS's compatibility layer (`AddCompatibleObjectExplicit`) if it has no row yet. This is the same call
+the engine uses for an actor's components. The new row arrives with the sync tag, and the processor picks it up. This
+is what keeps the count right while PCG regenerates.
+
+**Counting is gated.** Nothing scans every row each frame. A count runs only when something changed: a placement
+column was written or removed, a level actor was added or deleted (`UEngine::OnLevelActorAdded` and
+`OnLevelActorDeleted`), the map or a streamed level changed, or the view's budget was edited. It waits 0.1 s after the
+last change, so a burst (a PCG cell writing hundreds of components) counts once. The count runs one query over the
+placement columns, sums each mesh's instances in the open level's world, and leaves out an actor that is already
+deleted (its component rows stay until garbage collection). When the first Scene Cost view is built, or the map
+changes, the backend looks at each component row once, because rows that synced before were not noted.
+
+**The join.** Each counted mesh is looked up in TedsAssetData's own rows, through the `Asset` mapping domain:
+
+```cpp
+const RowHandle AssetRow = Storage.LookupMappedRow(UE::Editor::AssetData::MappingDomain, FMapKey(Path));
+const FAssetDataColumn_Experimental* Column = Storage.GetColumn<FAssetDataColumn_Experimental>(AssetRow);
+```
+
+Its facts come from the registry tags on that row. *Triangles* is `NaniteTriangles` for a Nanite mesh and `Triangles`
+(LOD 0) otherwise. *Est. Memory* is `EstNaniteCompressedSize` or `EstTotalCompressedSize`. When a tag is missing, the
+loaded mesh answers. *Scene Tris* is *Placed* x *Triangles*.
+
+**Rows and columns.** Each Scene Cost view's rows are TEDS rows in a table of their own (`ContentViews_SceneMeshes`),
+one per placed mesh, tagged with the view's own dynamic tag. Their columns are the same templates the asset views use:
+`FContentViewStringColumn` for *Mesh* and *Nanite*, and `FContentViewNumberColumn` for *Placed*, *Triangles*,
+*Scene Tris* and *Est. Memory*. So they sort as numbers with TEDS's own sorter and draw with the same cells and
+headers. The table opens sorted by *Scene Tris*, highest first. An over-budget mesh gets a TEDS alert through
+`Alerts::AddAlert`, with the scene triangles and the budget in its message, in the stock alert column.
+
+**The widget** (`SSceneCostView`). The top bar names the level being counted and its loaded actor count, and holds the
+budget, which edits the view asset in a transaction. The table is an `STedsTableViewer`. A mesh row opens its mesh on
+double-click and gives the asset menu on right-click. Selecting a row lists that mesh's placements below: actor, component,
+kind (static, instanced, hierarchical instanced), instances, and the World Partition grid the actor streams in (or
+*Always loaded*; `-` in a level without World Partition). Two buttons work on those placements. *Select in Level*
+selects their actors. *Frame* moves the level viewports to them. The status line gives the totals: meshes, instances,
+components, scene triangles, and the share that is not Nanite. With nothing selected, the costliest mesh is listed.
+
+`ContentViews.SceneCost.Dump [rows]` logs the totals and each Scene Cost view's first rows, for agents and for logs.
+`ContentViews.OpenSource "Scene Cost (example)" [w h]` opens the widget in its own window.
+
+**Limits.** It counts static mesh components (plain, instanced, hierarchical instanced) in the editor world: the level
+open in the editor and its loaded sublevels and cells. Unloaded World Partition cells are not counted. Neither are
+skeletal meshes, landscape, foliage painted through the foliage tool's own instancer, or instanced actors. A Nanite
+mesh is counted at its Nanite triangle count, which is its source detail, not what renders at a given distance. The
+budget alerts only on meshes that are not Nanite. The archetype is built as this one view; a generic Join base, for
+example materials by placed use, is not extracted yet.
 
 **Why both backends read one asset.** A view is a description of a table, not of a widget. Keeping rows, columns,
 sort and filters in one data asset means a view made for one backend works in the other, and the MCP
