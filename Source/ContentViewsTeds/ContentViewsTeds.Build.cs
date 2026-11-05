@@ -38,6 +38,8 @@ public class ContentViewsTeds : ModuleRules
 			"TedsAssetData",
 			"TedsQueryStack",
 			"TedsTableViewer",
+			"ToolsetRegistry",
+			"Json",
 		});
 
 		// The plugin's test row class, shared with the legacy module's tests.

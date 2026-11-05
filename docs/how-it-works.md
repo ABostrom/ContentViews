@@ -115,8 +115,22 @@ registry for those assets and reads their tags too. Any view can then list `Over
 
 ## The legacy backend
 
-The Content Views tab (`SContentViewsTab.cpp`) is a nomad tab with two panes. The left is a list of view assets from
-the registry. The right is built from the chosen view with `IContentBrowserSingleton::CreateAssetPicker`, the same
+The Content Views tab (`SContentViewsTab.cpp`) is a nomad tab with two panes. The left is a list of view assets of
+every archetype from the registry (`UE::ContentViews::FindViews`, every `UContentViewBase`). For a view of another
+archetype, the right pane is the widget the archetype's module registered for its class:
+
+```cpp
+// ContentViewsTeds: Scene Cost in the tab is the same widget its Content Source shows.
+UE::ContentViews::RegisterViewWidget(*USceneCostView::StaticClass(), [](UContentViewBase& View) -> TSharedRef<SWidget>
+{
+	return SNew(SSceneCostView, FSoftObjectPath(&View));
+});
+```
+
+That registry (`Public/ContentViewWidgets.h`) is how the legacy module shows Scene Cost without depending on TEDS: the
+dependency runs one way, from the TEDS module to this one. A view whose class nothing registered says so in the pane.
+
+For a view of assets, the right pane is built with `IContentBrowserSingleton::CreateAssetPicker`, the same
 widget the Content Browser's asset view is made of, so it looks and behaves like the Content Browser:
 
 - `FAssetPickerConfig::Filter` is `MakeRowFilter` for the row class.
@@ -135,7 +149,8 @@ widget the Content Browser's asset view is made of, so it looks and behaves like
   own common section (rename, delete, duplicate) is private to it, so it is not there.
 
 **Frontend filters.** `UContentViewsFilterExtension` is a `UContentBrowserFrontEndFilterExtension`. When a Content
-Browser builds its filter list, it adds one `FFrontendFilter` per view under a *Content Views* category. The filter
+Browser builds its filter list, it adds one `FFrontendFilter` per view of assets under a *Content Views* category (a
+Scene Cost view lists placements, not assets, so it adds none). The filter
 passes an item if it is a row of the view and meets the view's filters, so any Content Browser can show a view's
 selection inside its normal folders.
 
@@ -156,7 +171,7 @@ exposes it as `ContentViews.ContentViewsTools`:
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `ListViews` | none | each view's name, asset path, row class and columns |
+| `ListViews` | none | every view's name, asset path and archetype; for a view of assets, its row class and columns |
 | `DescribeView` | `view` | its columns with types, its filters, its default sort and its row count |
 | `RunView` | `view`, `filters`, `sortColumn`, `bSortDescending`, `limit` | rows: `assetPath` and `values` |
 | `ExportView` | `view` | the view's definition as data |
@@ -194,6 +209,17 @@ its full path so an agent can open or edit it:
 ```
 
 A bad filter, an unknown view or a column no row carries is refused with a script error naming it.
+
+`ListViews` lists views of every archetype. Its `archetype` field is the view's class: `ContentViewDefinition` for a
+view of assets, which the tools above run, or `SceneCostView`, which the TEDS module's own toolset runs,
+`ContentViewsTeds.SceneCostTools`:
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `RunSceneCost` | `view`, `limit` | the level counted, its totals, the view's budget, `bCaughtUp`, and rows: `mesh`, `placed`, `triangles`, `sceneTriangles`, `bNanite`, `estMemory`, `alert` |
+| `Placements` | `view`, `mesh` (object path or asset name) | each component placing the mesh: `actor` and `component` paths, `actorLabel`, `kind`, `instances`, `cell` |
+
+Both need an editor with the TEDS backend on. `bCaughtUp` is false while a change is still waiting to be counted.
 
 ## The TEDS backend
 
@@ -345,24 +371,37 @@ how many times it is placed, how many triangles that puts in the scene, and whet
 answers that. It is the first view of the Join archetype, rows that are assets joined with world counts, and it is
 TEDS-only, because the counts come from TEDS's actor and component rows.
 
-![Scene Cost on a level built from engine shapes](images/scene-cost-example.png)
+![Scene Cost on the example level](images/scene-cost-example.png)
 
 ```
-Scene Cost (example) > L_SceneCostExample (loaded: 57 actors)    Non-Nanite budget (scene triangles) [1000000]
+Scene Cost (example) > L_SceneCostExample (loaded: 23 actors)    Non-Nanite budget (scene triangles) [1000000]
 Mesh      | Placed | Triangles | Scene Tris v | Nanite | Est. Memory | Alerts
-Sphere    |     10 |       960 |        9,600 | No     | -           |
-Cylinder  |      6 |       512 |        3,072 | No     | -           |
-Cone      |      6 |       284 |        1,704 | No     | -           |
-Cube      |     24 |        48 |        1,152 | No     | -           |
+Sphere    |  4,001 |       960 |    3,840,960 | No     | -           | over the budget of 1,000,000
+Cone      |    302 |       284 |       85,768 | No     | -           |
+Cylinder  |      3 |       512 |        1,536 | No     | -           |
+Cube      |      4 |        48 |          192 | No     | -           |
 Plane     |      1 |         2 |            2 | No     | -           |
-Placements of Sphere . 10 instances in 10 components                      [Select in Level] [Frame]
-Actor | Component | Kind | Instances | Cell
-5 meshes . 47 instances in 47 components . 15.5K scene triangles . 100% not Nanite
+Placements of Sphere . 4,001 instances in 2 components                    [Select in Level] [Frame]
+Actor        | Component                          | Kind                   | Instances | Cell
+HISM_Spheres | HierarchicalInstancedStaticMesh    | Hierarchical instanced |     4,000 | -
+Sphere_1     | StaticMeshComponent0               | Static                 |         1 | -
+5 meshes . 4,311 instances in 13 components . 3.9M scene triangles . 100% not Nanite
 ```
 
-The capture and the block above come from a level of engine basic shapes (a plane, 24 cubes, 10 spheres, 6 cylinders
-and 6 cones as static mesh actors). The engine's basic shapes carry no compressed-size tag, so *Est. Memory* reads `-`.
-In a project's own level the same view counts every placed mesh, instanced components by their instances.
+The capture and the block above are the plugin's example level, `/ContentViews/Examples/L_SceneCostExample`, built
+from the engine's basic shapes only (no World Partition, no PCG):
+
+![The example level](images/scene-cost-example-level.png)
+
+- a floor (`Plane`, scaled to 60 m);
+- single static mesh actors: four cubes, three cylinders, two cones and a sphere;
+- `ISM_Cones`, an actor whose instanced static mesh component draws 300 cones;
+- `HISM_Spheres`, an actor whose hierarchical instanced static mesh component draws 4,000 spheres;
+- a movable sun, a sky atmosphere and a sky light that captures it in real time, so it renders with no lighting build.
+
+The 4,000 spheres and the single one put 3,840,960 triangles in the scene, and the sphere is not Nanite, so its row
+passes the example view's budget of 1,000,000 and carries the alert. The engine's basic shapes carry no compressed-size
+tag, so *Est. Memory* reads `-`. In a project's own level the same view counts every placed mesh.
 
 **The view asset.** `USceneCostView` (`Source/ContentViewsTeds/Public/SceneCostView.h`) derives from `UContentViewBase`,
 so it has a display name and an icon. It adds one field, `TriangleBudget`: a mesh that is not Nanite and puts more

@@ -20,7 +20,14 @@ struct FContentViewSummary
 	UPROPERTY()
 	FString AssetPath;
 
-	/** The class whose assets are its rows. */
+	/**
+	 * The view's class: ContentViewDefinition (rows are assets; DescribeView, RunView and ExportView read it) or another
+	 * archetype, run by its own tools (SceneCostView: ContentViewsTeds.SceneCostTools.RunSceneCost).
+	 */
+	UPROPERTY()
+	FString Archetype;
+
+	/** The class whose assets are its rows. Empty for a view whose rows are not assets. */
 	UPROPERTY()
 	FString RowClass;
 
@@ -63,8 +70,8 @@ class UContentViewsTools : public UToolsetDefinition
 
 public:
 	/**
-	 * Returns every view.
-	 * @return Each view's name, asset path, row class and columns.
+	 * Returns every view, of every archetype.
+	 * @return Each view's name, asset path, archetype, and for a view of assets its row class and columns.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "ContentViews")
 	static TArray<FContentViewSummary> ListViews();
@@ -97,5 +104,5 @@ public:
 
 private:
 	static UContentViewDefinition* FindViewOrRaise(const FString& View);
-	static FContentViewSummary Summarise(const UContentViewDefinition& View);
+	static FContentViewSummary Summarise(const UContentViewBase& View);
 };

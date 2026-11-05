@@ -13,6 +13,7 @@
 #include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
+#include "ContentViewWidgets.h"
 #include "Editor.h"
 #include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandList.h"
@@ -289,6 +290,44 @@ namespace
 		}
 		return Picker;
 	}
+
+	/** View class -> the widget the tab shows for it, registered by the module that owns the archetype. */
+	TMap<TWeakObjectPtr<const UClass>, UE::ContentViews::FMakeViewWidget>& ContentViewWidgetMakers()
+	{
+		static TMap<TWeakObjectPtr<const UClass>, UE::ContentViews::FMakeViewWidget> Makers;
+		return Makers;
+	}
+}
+
+namespace UE::ContentViews
+{
+	void RegisterViewWidget(const UClass& ViewClass, FMakeViewWidget Make)
+	{
+		ContentViewWidgetMakers().Add(&ViewClass, MoveTemp(Make));
+	}
+
+	void UnregisterViewWidget(const UClass& ViewClass)
+	{
+		ContentViewWidgetMakers().Remove(&ViewClass);
+	}
+
+	TSharedRef<SWidget> MakeViewWidget(UContentViewBase& View)
+	{
+		if (const UContentViewDefinition* Assets = Cast<UContentViewDefinition>(&View))
+		{
+			return ContentViewMakePicker(*Assets);
+		}
+		for (const UClass* Class = View.GetClass(); Class; Class = Class->GetSuperClass())
+		{
+			if (const FMakeViewWidget* Make = ContentViewWidgetMakers().Find(Class))
+			{
+				return (*Make)(View);
+			}
+		}
+		return SNew(STextBlock).Margin(FMargin(8.f)).Text(FText::Format(
+			LOCTEXT("NoViewWidget", "Nothing in this editor draws a {0} view; the module that owns it is not loaded."),
+			View.GetClass()->GetDisplayNameText()));
+	}
 }
 
 void SContentViewsTab::Construct(const FArguments& InArgs)
@@ -336,7 +375,7 @@ SContentViewsTab::~SContentViewsTab()
 	FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
 }
 
-void SContentViewsTab::ShowView(const UContentViewDefinition& View)
+void SContentViewsTab::ShowView(const UContentViewBase& View)
 {
 	const FSoftObjectPath Path(&View);
 	for (const FViewItem& Item : ViewItems)
@@ -380,19 +419,19 @@ void SContentViewsTab::RefreshViewList()
 
 void SContentViewsTab::RebuildPicker()
 {
-	const UContentViewDefinition* View = Shown.Get();
-	PickerHost->SetContent(View ? ContentViewMakePicker(*View) : SNullWidget::NullWidget);
+	UContentViewBase* View = Shown.Get();
+	PickerHost->SetContent(View ? UE::ContentViews::MakeViewWidget(*View) : SNullWidget::NullWidget);
 }
 
 TSharedRef<ITableRow> SContentViewsTab::MakeViewRow(FViewItem Item, const TSharedRef<STableViewBase>& Owner)
 {
 	FText Label;
-	if (!Item->GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewDefinition, DisplayName), Label) || Label.IsEmpty())
+	if (!Item->GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewBase, DisplayName), Label) || Label.IsEmpty())
 	{
 		Label = FText::FromName(Item->AssetName);
 	}
 	FName Icon;
-	if (!Item->GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewDefinition, Icon), Icon) || Icon.IsNone())
+	if (!Item->GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewBase, Icon), Icon) || Icon.IsNone())
 	{
 		Icon = TEXT("ClassIcon.DataAsset");
 	}
@@ -421,7 +460,7 @@ TSharedRef<ITableRow> SContentViewsTab::MakeViewRow(FViewItem Item, const TShare
 
 void SContentViewsTab::HandleViewSelected(FViewItem Item, ESelectInfo::Type SelectInfo)
 {
-	UContentViewDefinition* View = Item.IsValid() ? Cast<UContentViewDefinition>(Item->GetAsset()) : nullptr;
+	UContentViewBase* View = Item.IsValid() ? Cast<UContentViewBase>(Item->GetAsset()) : nullptr;
 	if (View == Shown.Get())
 	{
 		return;
@@ -432,7 +471,7 @@ void SContentViewsTab::HandleViewSelected(FViewItem Item, ESelectInfo::Type Sele
 
 void SContentViewsTab::HandleAssetsChanged(const FAssetData& Asset)
 {
-	if (Asset.IsInstanceOf(UContentViewDefinition::StaticClass()))
+	if (Asset.IsInstanceOf(UContentViewBase::StaticClass()))
 	{
 		RefreshViewList();
 	}
@@ -445,7 +484,8 @@ void SContentViewsTab::HandleAssetRenamed(const FAssetData& Asset, const FString
 
 void SContentViewsTab::HandleObjectChanged(UObject* Object, FPropertyChangedEvent& Event)
 {
-	if (Object && Object == Shown.Get())
+	// An asset view's picker is built from the view's fields; another archetype's widget follows its own view.
+	if (Object && Object == Shown.Get() && Object->IsA<UContentViewDefinition>())
 	{
 		RebuildPicker();
 	}

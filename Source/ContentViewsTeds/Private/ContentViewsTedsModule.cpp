@@ -1,13 +1,19 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentViewQuery.h"
+#include "ContentViewWidgets.h"
 #include "ContentViewsTedsBackend.h"
 #include "SceneCostView.h"
 #include "SSceneCostView.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Engine/Engine.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/CoreDelegates.h"
 #include "Modules/ModuleManager.h"
+#include "SceneCostTools.h"
 #include "SContentViewsSource.h"
+#include "ToolsetRegistry/UToolsetRegistry.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "ContentViewsTeds"
 
@@ -17,6 +23,28 @@ class FContentViewsTedsModule : public IModuleInterface
 public:
 	virtual void StartupModule() override
 	{
+		// Scene Cost in the Content Views tab: the same widget its Content Source shows.
+		UE::ContentViews::RegisterViewWidget(*USceneCostView::StaticClass(), [](UContentViewBase& View) -> TSharedRef<SWidget>
+		{
+			const FSoftObjectPath Path(&View);
+			if (!UE::ContentViews::Teds::FBackend::Get().FindSceneView(Path))
+			{
+				return SNew(STextBlock).Margin(FMargin(8.f)).AutoWrapText(true).Text(LOCTEXT("SceneCostNeedsTeds",
+					"Scene Cost counts with the TEDS backend on: Project Settings > Plugins > Content Views > Backend, TEDS or Both."));
+			}
+			return SNew(SSceneCostView, Path);
+		});
+
+		// The toolset registry is an editor subsystem, so it exists only once the engine has started.
+		if (GEngine && GEngine->IsInitialized())
+		{
+			RegisterToolset();
+		}
+		else
+		{
+			FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FContentViewsTedsModule::RegisterToolset);
+		}
+
 		DumpCommand = MakeUnique<FAutoConsoleCommand>(TEXT("ContentViews.SceneCost.Dump"),
 			TEXT("Logs Scene Cost's totals and each Scene Cost view's first rows. ContentViews.SceneCost.Dump [rows]"),
 			FConsoleCommandWithArgsDelegate::CreateStatic(&FContentViewsTedsModule::DumpSceneCost));
@@ -53,30 +81,25 @@ public:
 	/** A view with a source, of either archetype, by display name, asset name or object path. */
 	static const UContentViewBase* FindSourceView(const FString& Name)
 	{
-		const UE::ContentViews::Teds::FBackend& Backend = UE::ContentViews::Teds::FBackend::Get();
-		if (const UContentViewDefinition* View = UE::ContentViews::FindView(Name); View && Backend.FindView(FSoftObjectPath(View)))
-		{
-			return View;
-		}
-		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
-		TArray<FAssetData> Scenes;
-		Registry.GetAssetsByClass(USceneCostView::StaticClass()->GetClassPathName(), Scenes, /*bSearchSubClasses*/ true);
-		for (const FAssetData& Asset : Scenes)
-		{
-			const USceneCostView* Scene = Cast<USceneCostView>(Asset.GetAsset());
-			if (Scene && Backend.FindSceneView(FSoftObjectPath(Scene)) && (Scene->GetViewName().ToString().Equals(Name, ESearchCase::IgnoreCase)
-				|| Asset.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase) || Asset.GetObjectPathString().Equals(Name, ESearchCase::IgnoreCase)))
-			{
-				return Scene;
-			}
-		}
-		return nullptr;
+		const UContentViewBase* View = UE::ContentViews::FindViewAsset(Name);
+		return View && UE::ContentViews::Teds::FBackend::Get().FindViewAsset(FSoftObjectPath(View)) ? View : nullptr;
 	}
 
 	virtual void ShutdownModule() override
 	{
+		FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
 		OpenCommand.Reset();
 		DumpCommand.Reset();
+		if (UObjectInitialized())
+		{
+			UE::ContentViews::UnregisterViewWidget(*USceneCostView::StaticClass());
+			UToolsetRegistry::UnregisterToolsetClass(USceneCostTools::StaticClass());
+		}
+	}
+
+	void RegisterToolset()
+	{
+		UToolsetRegistry::RegisterToolsetClass(USceneCostTools::StaticClass());
 	}
 
 	/** For agents and logs: Scene Cost's totals and each Scene Cost view's first rows, most scene triangles first. */

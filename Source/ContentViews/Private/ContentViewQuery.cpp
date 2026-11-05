@@ -335,26 +335,31 @@ namespace UE::ContentViews
 	TArray<FAssetData> FindViews()
 	{
 		TArray<FAssetData> Views;
-		ContentViewRegistry().GetAssetsByClass(UContentViewDefinition::StaticClass()->GetClassPathName(), Views,
+		ContentViewRegistry().GetAssetsByClass(UContentViewBase::StaticClass()->GetClassPathName(), Views,
 			/*bSearchSubClasses*/ true);
 		Views.Sort([](const FAssetData& A, const FAssetData& B) { return A.AssetName.LexicalLess(B.AssetName); });
 		return Views;
 	}
 
-	UContentViewDefinition* FindView(const FString& Name)
+	UContentViewBase* FindViewAsset(const FString& Name)
 	{
 		for (const FAssetData& View : FindViews())
 		{
 			FText Shown;
-			const bool bShownMatches = View.GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewDefinition, DisplayName), Shown)
+			const bool bShownMatches = View.GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewBase, DisplayName), Shown)
 				&& Shown.ToString().Equals(Name, ESearchCase::IgnoreCase);
 			if (bShownMatches || View.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase)
 				|| View.GetObjectPathString().Equals(Name, ESearchCase::IgnoreCase))
 			{
-				return Cast<UContentViewDefinition>(View.GetAsset());
+				return Cast<UContentViewBase>(View.GetAsset());
 			}
 		}
 		return nullptr;
+	}
+
+	UContentViewDefinition* FindView(const FString& Name)
+	{
+		return Cast<UContentViewDefinition>(FindViewAsset(Name));
 	}
 }
 

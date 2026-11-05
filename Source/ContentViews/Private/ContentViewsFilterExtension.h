@@ -5,7 +5,7 @@
 #include "ContentViewsFilterExtension.generated.h"
 
 /**
- * One Content Browser filter per view asset, under the Content Views category: it passes the view's rows that meet the
+ * One Content Browser filter per asset view (UContentViewDefinition; other archetypes filter no assets), under the Content Views category: it passes the view's rows that meet the
  * view's filters, so any Content Browser can show a view's selection. Built when a Content Browser builds its filters.
  */
 UCLASS()

@@ -9,7 +9,7 @@ TArray<FContentViewSummary> UContentViewsTools::ListViews()
 	TArray<FContentViewSummary> Views;
 	for (const FAssetData& Asset : UE::ContentViews::FindViews())
 	{
-		if (const UContentViewDefinition* View = Cast<UContentViewDefinition>(Asset.GetAsset()))
+		if (const UContentViewBase* View = Cast<UContentViewBase>(Asset.GetAsset()))
 		{
 			Views.Add(Summarise(*View));
 		}
@@ -79,9 +79,17 @@ FContentViewSpec UContentViewsTools::ExportView(const FString& View)
 
 UContentViewDefinition* UContentViewsTools::FindViewOrRaise(const FString& View)
 {
-	if (UContentViewDefinition* Found = UE::ContentViews::FindView(View))
+	UContentViewBase* Found = UE::ContentViews::FindViewAsset(View);
+	if (UContentViewDefinition* Assets = Cast<UContentViewDefinition>(Found))
 	{
-		return Found;
+		return Assets;
+	}
+	if (Found)
+	{
+		UKismetSystemLibrary::RaiseScriptError(FString::Printf(
+			TEXT("'%s' is a %s, whose rows are not assets; ListViews names its archetype, and that archetype's own tools run it."),
+			*View, *Found->GetClass()->GetName()));
+		return nullptr;
 	}
 	TArray<FString> Names;
 	for (const FAssetData& Asset : UE::ContentViews::FindViews())
@@ -93,15 +101,19 @@ UContentViewDefinition* UContentViewsTools::FindViewOrRaise(const FString& View)
 	return nullptr;
 }
 
-FContentViewSummary UContentViewsTools::Summarise(const UContentViewDefinition& View)
+FContentViewSummary UContentViewsTools::Summarise(const UContentViewBase& View)
 {
 	FContentViewSummary Summary;
 	Summary.Name = View.GetViewName().ToString();
 	Summary.AssetPath = FSoftObjectPath(&View).ToString();
-	Summary.RowClass = View.RowClass.ToString();
-	for (const FName Column : View.Columns)
+	Summary.Archetype = View.GetClass()->GetName();
+	if (const UContentViewDefinition* Assets = Cast<UContentViewDefinition>(&View))
 	{
-		Summary.Columns.Add(Column.ToString());
+		Summary.RowClass = Assets->RowClass.ToString();
+		for (const FName Column : Assets->Columns)
+		{
+			Summary.Columns.Add(Column.ToString());
+		}
 	}
 	return Summary;
 }

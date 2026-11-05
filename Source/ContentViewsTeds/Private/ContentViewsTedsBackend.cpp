@@ -340,25 +340,20 @@ namespace UE::ContentViews::Teds
 		}
 		for (const FAssetData& Asset : FindViews())
 		{
-			if (!Views.Contains(Asset.GetSoftObjectPath()))
+			const FSoftObjectPath Path = Asset.GetSoftObjectPath();
+			if (Views.Contains(Path) || SceneViews.Contains(Path))
 			{
-				// View assets are small and the legacy backend loads them the same way.
-				if (UContentViewDefinition* View = Cast<UContentViewDefinition>(Asset.GetAsset()))
-				{
-					BuildView(*View);
-				}
+				continue;
 			}
-		}
-		TArray<FAssetData> Scenes;
-		Registry.GetAssetsByClass(USceneCostView::StaticClass()->GetClassPathName(), Scenes, /*bSearchSubClasses*/ true);
-		for (const FAssetData& Asset : Scenes)
-		{
-			if (!SceneViews.Contains(Asset.GetSoftObjectPath()))
+			// View assets are small and the legacy backend loads them the same way.
+			UObject* View = Asset.GetAsset();
+			if (UContentViewDefinition* Assets = Cast<UContentViewDefinition>(View))
 			{
-				if (USceneCostView* View = Cast<USceneCostView>(Asset.GetAsset()))
-				{
-					BuildSceneView(*View);
-				}
+				BuildView(*Assets);
+			}
+			else if (USceneCostView* Scene = Cast<USceneCostView>(View))
+			{
+				BuildSceneView(*Scene);
 			}
 		}
 	}

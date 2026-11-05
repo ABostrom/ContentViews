@@ -45,6 +45,8 @@ namespace UE::ContentViews::Teds
 		int64 Triangles = 0;
 		int64 SceneTriangles = 0;
 		bool bNanite = false;
+		/** Estimated compressed size of one copy of the mesh, in bytes; 0 when the registry has no estimate. */
+		int64 Memory = 0;
 		FString Alert;
 	};
 }

@@ -60,7 +60,7 @@ namespace
 namespace UE::ContentViews
 {
 	/** Opens the Content Views tab on View, sized Size when given (for captures). */
-	void OpenView(const UContentViewDefinition* View, const FVector2D& Size = FVector2D::ZeroVector)
+	void OpenView(const UContentViewBase* View, const FVector2D& Size = FVector2D::ZeroVector)
 	{
 		const TSharedPtr<SDockTab> Tab = FGlobalTabmanager::Get()->TryInvokeTab(ContentViewsTabId);
 		if (const TSharedPtr<SContentViewsTab> Widget = GContentViewsTab.Pin(); Widget && View)
@@ -105,7 +105,7 @@ public:
 			TEXT("Opens the Content Views tab. ContentViews.Open [view name] [width height]"),
 			FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
 			{
-				const UContentViewDefinition* View = Args.Num() > 0 ? UE::ContentViews::FindView(Args[0]) : nullptr;
+				const UContentViewBase* View = Args.Num() > 0 ? UE::ContentViews::FindViewAsset(Args[0]) : nullptr;
 				const FVector2D Size = Args.Num() > 2
 					? FVector2D(FCString::Atof(*Args[1]), FCString::Atof(*Args[2])) : FVector2D::ZeroVector;
 				UE::ContentViews::OpenView(View, Size);

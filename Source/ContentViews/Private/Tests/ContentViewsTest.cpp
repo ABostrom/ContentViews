@@ -5,6 +5,11 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
+#include "ContentViewWidgets.h"
+#include "ContentViewsFilterExtension.h"
+#include "ContentViewsTools.h"
+#include "FrontendFilterBase.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Dom/JsonObject.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -355,6 +360,66 @@ bool FContentViewsLiveTest::RunTest(const FString& Parameters)
 	const FContentViewRow* New = Found.FindByPredicate([](const FContentViewRow& Row) { return Row.AssetPath.EndsWith(TEXT("Row_New.Row_New")); });
 	TestTrue(TEXT("the unsaved row is a row of the new view with its Speed"),
 		New && New->Values.FindChecked(TEXT("Speed")).Number == 77.0);
+	return true;
+}
+
+/**
+ * Situation: beside the fixture's asset view, a view of another archetype (as Scene Cost is), in an open tab, the
+ * Content Browser's filter list and the ListViews tool; then a widget registered for its class.
+ * Why it matters: Scene Cost was missing from the tab, the menu and MCP because each list found asset views only.
+ * Pass: every list finds it with its archetype; it adds no asset filter; the tab says nothing draws it until a widget is
+ * registered for its class, then shows that widget.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsOtherArchetypeTest,
+	"ContentViews.EveryListFindsAViewOfAnotherArchetype",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsOtherArchetypeTest::RunTest(const FString& Parameters)
+{
+	FContentViewsTestRows Rows;
+	UPackage* Package = CreatePackage(*(Rows.Folder / TEXT("CV_ContentViewsTestOther")));
+	UContentViewsTestOtherView* Other = NewObject<UContentViewsTestOtherView>(Package, TEXT("CV_ContentViewsTestOther"), RF_Public | RF_Standalone);
+	Other->DisplayName = FText::FromString(TEXT("Content Views Test Other"));
+	Rows.Register(Other);
+	const FSoftObjectPath OtherPath(Other);
+
+	TestTrue(TEXT("FindViews finds it"), UE::ContentViews::FindViews().ContainsByPredicate(
+		[&OtherPath](const FAssetData& Asset) { return Asset.GetSoftObjectPath() == OtherPath; }));
+	TestTrue(TEXT("FindViewAsset finds it by display name"), UE::ContentViews::FindViewAsset(TEXT("Content Views Test Other")) == Other);
+	TestNull(TEXT("FindView, asset views only, does not"), UE::ContentViews::FindView(TEXT("Content Views Test Other")));
+
+	const TSharedRef<SContentViewsTab> Tab = SNew(SContentViewsTab);
+	TestTrue(TEXT("the tab lists it"), Tab->GetListedViews().Contains(OtherPath));
+
+	TArray<TSharedRef<FFrontendFilter>> Filters;
+	GetDefault<UContentViewsFilterExtension>()->AddFrontEndFilterExtensions(nullptr, Filters);
+	const auto HasFilter = [&Filters](const FString& Name)
+	{
+		return Filters.ContainsByPredicate([&Name](const TSharedRef<FFrontendFilter>& Filter) { return Filter->GetName() == Name; });
+	};
+	TestTrue(TEXT("the asset view is a filter"), HasFilter(TEXT("ContentView_CV_ContentViewsTest")));
+	TestFalse(TEXT("the other archetype is not"), HasFilter(TEXT("ContentView_CV_ContentViewsTestOther")));
+
+	const TArray<FContentViewSummary> Listed = UContentViewsTools::ListViews();
+	const FContentViewSummary* Summary = Listed.FindByPredicate([&OtherPath](const FContentViewSummary& Each)
+	{
+		return Each.AssetPath == OtherPath.ToString();
+	});
+	if (TestNotNull(TEXT("ListViews lists it"), Summary))
+	{
+		TestEqual(TEXT("with its archetype"), Summary->Archetype, FString(TEXT("ContentViewsTestOtherView")));
+		TestTrue(TEXT("and no row class"), Summary->RowClass.IsEmpty());
+	}
+
+	TestEqual(TEXT("with nothing registered the tab says nothing draws it"),
+		UE::ContentViews::MakeViewWidget(*Other)->GetType(), FName(TEXT("STextBlock")));
+	UE::ContentViews::RegisterViewWidget(*UContentViewsTestOtherView::StaticClass(), [](UContentViewBase&) -> TSharedRef<SWidget>
+	{
+		return SNew(SSpacer);
+	});
+	TestEqual(TEXT("with a widget registered for its class the tab shows it"),
+		UE::ContentViews::MakeViewWidget(*Other)->GetType(), FName(TEXT("SSpacer")));
+	UE::ContentViews::UnregisterViewWidget(*UContentViewsTestOtherView::StaticClass());
 	return true;
 }
 

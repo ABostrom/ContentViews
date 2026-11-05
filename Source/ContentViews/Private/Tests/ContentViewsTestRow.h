@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "ContentViewDefinition.h"
 #include "ContentViewsTestRow.generated.h"
 
 /** The row class the plugin's tests build views over: one field of each kind a column reads. */
@@ -34,4 +35,11 @@ class UContentViewsTestOther : public UObject
 public:
 	UPROPERTY(EditAnywhere, AssetRegistrySearchable, Category = "Test")
 	float Speed = 0.f;
+};
+
+/** A view of an archetype that is not assets, as Scene Cost is: the lists must find it, and only a registered widget draws it. */
+UCLASS(HideDropdown, NotPlaceable)
+class UContentViewsTestOtherView : public UContentViewBase
+{
+	GENERATED_BODY()
 };

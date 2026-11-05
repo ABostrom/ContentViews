@@ -545,6 +545,7 @@ namespace UE::ContentViews::Teds
 			Out.Placed = static_cast<int64>(Read(TEXT("Placed")));
 			Out.Triangles = static_cast<int64>(Read(TEXT("Triangles")));
 			Out.SceneTriangles = static_cast<int64>(Read(FBackend::SceneTrianglesColumn));
+			Out.Memory = static_cast<int64>(Read(TEXT("EstMemory")));
 			Out.bNanite = Backend.ReadValue(Pair.Value, *Backend.FindSceneSlot(TEXT("Nanite"))).String == TEXT("Yes");
 			if (const FTedsAlertColumn* Alert = Storage->GetColumn<FTedsAlertColumn>(Pair.Value))
 			{

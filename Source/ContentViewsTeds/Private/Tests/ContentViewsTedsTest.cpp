@@ -6,6 +6,11 @@
 #include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
+#include "ContentViewWidgets.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
 #include "ContentViewsSettings.h"
 #include "ContentViewsTeds.h"
 #include "ContentViewsTedsBackend.h"
@@ -774,6 +779,226 @@ bool FContentViewsTedsSceneCostTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("the cube, at the budget (%lld), has none: %s"), Cube.SceneTriangles, *Cube.Alert), Cube.Alert.IsEmpty());
 		const TArray<UE::ContentViews::Teds::FSceneCostRow> All = UE::ContentViews::Teds::ReadSceneRows(*View);
 		TestTrue(TEXT("most scene triangles first"), All.Num() == 2 && All[0].Mesh == TedsTestSphere);
+	});
+	return true;
+}
+
+namespace
+{
+	const TCHAR* const TedsTestSceneCostExample = TEXT("/ContentViews/Examples/CV_SceneCost.CV_SceneCost");
+	const TCHAR* const TedsTestHeavyMeshesExample = TEXT("/ContentViews/Examples/CV_HeavyMeshes.CV_HeavyMeshes");
+
+	/** Calls a tool through the toolset registry, as MCP does, and hands its returnValue on; a failed call is an error. */
+	void TedsTestCallTool(FAutomationTestBase& Test, const TCHAR* Tool, const FString& Input, TFunction<void(const TSharedPtr<FJsonValue>&)> Then)
+	{
+		using FCall = TOptional<TFuture<TValueOrError<FString, FString>>>;
+		TSharedRef<FCall> Call = MakeShared<FCall>();
+		const FString Name = Tool;
+		Test.AddCommand(new FFunctionLatentCommand([&Test, Call, Name, Input, Then]()
+		{
+			if (!Call->IsSet())
+			{
+				TValueOrError<TObjectPtr<UToolsetRegistrySubsystem>, FString> Subsystem = UToolsetRegistrySubsystem::Get();
+				if (!Test.TestTrue(TEXT("the toolset registry is running"), Subsystem.HasValue()))
+				{
+					return true;
+				}
+				Call->Emplace(Subsystem.GetValue()->ToolsetRegistry.ExecuteTool(Name, Input));
+			}
+			if (!Call->GetValue().IsReady())
+			{
+				return false;
+			}
+			const TValueOrError<FString, FString>& Result = Call->GetValue().Get();
+			if (!Test.TestTrue(*FString::Printf(TEXT("%s answered"), *Name), Result.HasValue()))
+			{
+				Test.AddError(Result.GetError());
+				return true;
+			}
+			TSharedPtr<FJsonObject> Root;
+			FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Result.GetValue()), Root);
+			const TSharedPtr<FJsonValue> Value = Root.IsValid() ? Root->TryGetField(TEXT("returnValue")) : nullptr;
+			if (!Test.TestTrue(*FString::Printf(TEXT("%s gave a returnValue"), *Name), Value.IsValid()))
+			{
+				Test.AddInfo(Result.GetValue());
+				return true;
+			}
+			Then(Value);
+			return true;
+		}));
+	}
+}
+
+/**
+ * Situation: the backend switched off and on again, which runs the startup path (RefreshViews) over the view assets
+ * already on disk: the plugin's shipped Heavy Meshes and Scene Cost examples.
+ * Why it matters: Scene Cost had no Content Source in a fresh editor while the tests passed, because they only made views
+ * live (the asset-added path). A view already on disk at startup must get its source the same way.
+ * Pass: after the switch both shipped views have a source and the Scene Cost view is counting.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsStartupTest,
+	"ContentViews.Teds.ViewsAlreadyOnDiskGetTheirSourcesAtStartup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsStartupTest::RunTest(const FString& Parameters)
+{
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get().WaitForCompletion();
+	const EContentViewsBackend Was = GetDefault<UContentViewsSettings>()->Backend;
+	UE::ContentViews::Teds::FBackend& Backend = UE::ContentViews::Teds::FBackend::Get();
+	AddInfo(FString::Printf(TEXT("before the switch: Scene Cost source %d, Heavy Meshes source %d"),
+		Backend.HasSource(FSoftObjectPath(TedsTestSceneCostExample)), Backend.HasSource(FSoftObjectPath(TedsTestHeavyMeshesExample))));
+	FTedsTestRows::SetBackend(EContentViewsBackend::Legacy);
+	TestFalse(TEXT("off, Scene Cost has no source"), Backend.HasSource(FSoftObjectPath(TedsTestSceneCostExample)));
+	FTedsTestRows::SetBackend(EContentViewsBackend::Both);
+	TestTrue(TEXT("Heavy Meshes, on disk, has its source"), Backend.HasSource(FSoftObjectPath(TedsTestHeavyMeshesExample)));
+	TestTrue(TEXT("Scene Cost, on disk, has its source"), Backend.HasSource(FSoftObjectPath(TedsTestSceneCostExample)));
+	TestNotNull(TEXT("and is counting"), Backend.FindSceneView(FSoftObjectPath(TedsTestSceneCostExample)));
+	FTedsTestRows::SetBackend(Was);
+	return true;
+}
+
+/**
+ * Situation: a new level with three cubes and an instanced component of five spheres, a Scene Cost view over it, then
+ * the view in the Content Views tab, ListViews, and the RunSceneCost and Placements tools called as MCP calls them.
+ * Why it matters: an agent reads Scene Cost through these tools and a person through the tab; both were missing.
+ * Pass: the tab shows SSceneCostView; ListViews names its archetype; RunSceneCost gives the level, totals and the sphere
+ * first (limit 1); Placements gives the one instanced component with five instances and the actor's path.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsSceneToolsTest,
+	"ContentViews.Teds.SceneCostAnswersThroughItsToolsAndShowsInTheTab",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsSceneToolsTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TedsTestCube);
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TedsTestSphere);
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	if (!TestNotNull(TEXT("the engine's cube"), Cube) || !TestNotNull(TEXT("and sphere"), Sphere) || !TestNotNull(TEXT("a new level"), World))
+	{
+		return false;
+	}
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	UPackage* Package = CreatePackage(*(Rows->Folder / TEXT("CV_SceneCostToolTest")));
+	USceneCostView* View = NewObject<USceneCostView>(Package, TEXT("CV_SceneCostToolTest"), RF_Public | RF_Standalone);
+	View->DisplayName = FText::FromString(TEXT("CV_SceneCostToolTest"));
+	Rows->Register(View);
+
+	for (int32 Index = 0; Index < 3; ++Index)
+	{
+		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector(Index * 200.0, 0.0, 0.0), FRotator::ZeroRotator);
+		Actor->GetStaticMeshComponent()->SetStaticMesh(Cube);
+	}
+	AActor* Holder = World->SpawnActor<AActor>();
+	UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(Holder, TEXT("Spheres"));
+	Instances->SetStaticMesh(Sphere);
+	Holder->SetRootComponent(Instances);
+	Holder->AddInstanceComponent(Instances);
+	Instances->RegisterComponent();
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		Instances->AddInstance(FTransform(FVector(Index * 200.0, 500.0, 0.0)));
+	}
+	const FString HolderPath = FSoftObjectPath(Holder).ToString();
+
+	TedsTestWhenScene(*this, TEXT("the cubes and spheres are counted"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Cubes = TedsTestSceneRow(*View, TedsTestCube);
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Spheres = TedsTestSceneRow(*View, TedsTestSphere);
+		return Cubes && Cubes->Placed == 3 && Spheres && Spheres->Placed == 5;
+	}, [this, View]()
+	{
+		TestEqual(TEXT("the Content Views tab shows Scene Cost's own widget"),
+			UE::ContentViews::MakeViewWidget(*View)->GetType(), FName(TEXT("SSceneCostView")));
+	});
+
+	TedsTestCallTool(*this, TEXT("ContentViews.ContentViewsTools.ListViews"), TEXT("{}"), [this](const TSharedPtr<FJsonValue>& Value)
+	{
+		bool bListed = false;
+		for (const TSharedPtr<FJsonValue>& Each : Value->AsArray())
+		{
+			const TSharedPtr<FJsonObject> Summary = Each->AsObject();
+			bListed |= Summary->GetStringField(TEXT("assetPath")).EndsWith(TEXT("CV_SceneCostToolTest.CV_SceneCostToolTest"))
+				&& Summary->GetStringField(TEXT("archetype")) == TEXT("SceneCostView");
+		}
+		TestTrue(TEXT("ListViews lists the Scene Cost view as a SceneCostView"), bListed);
+	});
+
+	TedsTestCallTool(*this, TEXT("ContentViewsTeds.SceneCostTools.RunSceneCost"), TEXT(R"({"view":"CV_SceneCostToolTest","limit":1})"),
+		[this, World](const TSharedPtr<FJsonValue>& Value)
+	{
+		const TSharedPtr<FJsonObject> Result = Value->AsObject();
+		TestEqual(TEXT("it names the level counted"), Result->GetStringField(TEXT("level")), World->GetMapName());
+		TestEqual(TEXT("eight placements in total"), Result->GetNumberField(TEXT("instances")), 8.0);
+		const TArray<TSharedPtr<FJsonValue>>& Found = Result->GetArrayField(TEXT("rows"));
+		if (TestEqual(TEXT("one row, the limit"), Found.Num(), 1))
+		{
+			const TSharedPtr<FJsonObject> First = Found[0]->AsObject();
+			TestEqual(TEXT("the spheres put the most triangles in the scene"), First->GetStringField(TEXT("mesh")), FString(TedsTestSphere));
+			TestEqual(TEXT("placed five times"), First->GetNumberField(TEXT("placed")), 5.0);
+			TestEqual(TEXT("scene triangles are placed x triangles"), First->GetNumberField(TEXT("sceneTriangles")),
+				5.0 * First->GetNumberField(TEXT("triangles")));
+		}
+	});
+
+	TedsTestCallTool(*this, TEXT("ContentViewsTeds.SceneCostTools.Placements"), TEXT(R"({"view":"CV_SceneCostToolTest","mesh":"Sphere"})"),
+		[this, HolderPath, Rows](const TSharedPtr<FJsonValue>& Value)
+	{
+		const TArray<TSharedPtr<FJsonValue>>& Found = Value->AsArray();
+		if (TestEqual(TEXT("one component places the spheres"), Found.Num(), 1))
+		{
+			const TSharedPtr<FJsonObject> Placement = Found[0]->AsObject();
+			TestEqual(TEXT("the holder actor, by path"), Placement->GetStringField(TEXT("actor")), HolderPath);
+			TestTrue(TEXT("and its component, by path"), Placement->GetStringField(TEXT("component")).EndsWith(TEXT(".Spheres")));
+			TestEqual(TEXT("an instanced one"), Placement->GetStringField(TEXT("kind")), FString(TEXT("Instanced")));
+			TestEqual(TEXT("with five instances"), Placement->GetNumberField(TEXT("instances")), 5.0);
+		}
+	});
+	return true;
+}
+
+/**
+ * Situation: the plugin's example level, L_SceneCostExample, opened with the shipped Scene Cost view at its default budget.
+ * Why it matters: the example is how a newcomer sees Scene Cost work; if its instanced actors or its alert are not
+ * counted, the quick start shows nothing.
+ * Pass: the HISM's 4,000 spheres and the single sphere count 4,001 and carry the budget alert; the ISM's 300 cones and the
+ * two single cones count 302; the sphere's placements list the hierarchical component first, with 4,000 instances.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsExampleLevelTest,
+	"ContentViews.Teds.TheSceneCostExampleLevelCountsItsShapesAndAnAlert",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsExampleLevelTest::RunTest(const FString& Parameters)
+{
+	const USceneCostView* View = LoadObject<USceneCostView>(nullptr, TedsTestSceneCostExample);
+	if (!TestNotNull(TEXT("the shipped Scene Cost view"), View))
+	{
+		return false;
+	}
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	FAutomationEditorCommonUtils::LoadMap(TEXT("/ContentViews/Examples/L_SceneCostExample"));
+	const TCHAR* const Cone = TEXT("/Engine/BasicShapes/Cone.Cone");
+	TedsTestWhenScene(*this, TEXT("the example level's spheres and cones are counted, the spheres with an alert"), [View, Cone]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Spheres = TedsTestSceneRow(*View, TedsTestSphere);
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Cones = TedsTestSceneRow(*View, Cone);
+		// The alert is a TEDS column written a frame after the count, so it is waited for too.
+		return UE::ContentViews::Teds::ReadSceneTotals().Level == TEXT("L_SceneCostExample") && Spheres && Spheres->Placed == 4001
+			&& !Spheres->Alert.IsEmpty() && Cones && Cones->Placed == 302;
+	}, [this, View, Rows]()
+	{
+		const UE::ContentViews::Teds::FSceneCostRow Spheres = TedsTestSceneRow(*View, TedsTestSphere).GetValue();
+		TestTrue(*FString::Printf(TEXT("the spheres pass the budget of %lld: %s"), View->TriangleBudget, *Spheres.Alert), !Spheres.Alert.IsEmpty());
+		const TArray<UE::ContentViews::Teds::FSceneCostRow> All = UE::ContentViews::Teds::ReadSceneRows(*View);
+		TestTrue(TEXT("and come first"), !All.IsEmpty() && All[0].Mesh == TedsTestSphere);
+		const TArray<UE::ContentViews::Teds::FScenePlacement> Placements = UE::ContentViews::Teds::ReadPlacements(FSoftObjectPath(TedsTestSphere));
+		if (TestEqual(TEXT("two components place spheres"), Placements.Num(), 2))
+		{
+			TestEqual(TEXT("the hierarchical one first"), Placements[0].Kind, FString(TEXT("Hierarchical instanced")));
+			TestEqual(TEXT("with 4,000"), Placements[0].Instances, 4000);
+			TestEqual(TEXT("in a level without World Partition"), Placements[0].Cell, FString(TEXT("-")));
+		}
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Cube = TedsTestSceneRow(*View, TedsTestCube);
+		TestTrue(TEXT("four single cubes"), Cube && Cube->Placed == 4 && Cube->Alert.IsEmpty());
 	});
 	return true;
 }

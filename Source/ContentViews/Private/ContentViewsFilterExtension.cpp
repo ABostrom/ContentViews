@@ -76,6 +76,11 @@ void UContentViewsFilterExtension::AddFrontEndFilterExtensions(TSharedPtr<FFront
 		LOCTEXT("CategoryName", "Content Views"), LOCTEXT("CategoryTooltip", "The rows of each Content View."));
 	for (const FAssetData& Asset : UE::ContentViews::FindViews())
 	{
+		// Only an asset view filters assets; another archetype (Scene Cost lists placements) has no filter.
+		if (!Asset.IsInstanceOf(UContentViewDefinition::StaticClass()))
+		{
+			continue;
+		}
 		const UContentViewDefinition* View = Cast<UContentViewDefinition>(Asset.GetAsset());
 		UClass* RowClass = View ? UE::ContentViews::ResolveRowClass(*View) : nullptr;
 		if (RowClass)
