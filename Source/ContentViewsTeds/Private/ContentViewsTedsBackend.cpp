@@ -13,6 +13,7 @@
 #include "Elements/Interfaces/TypedElementDataStorageUiInterface.h"
 #include "HAL/IConsoleManager.h"
 #include "IContentBrowserSingleton.h"
+#include "SceneCostView.h"
 #include "Styling/AppStyle.h"
 #include "TedsAlertColumns.h"
 #include "TedsAlerts.h"
@@ -78,15 +79,13 @@ namespace UE::ContentViews::Teds
 
 	FText FContentViewSource::GetDisplayName()
 	{
-		const FViewState* State = FBackend::Get().FindView(Path);
-		const UContentViewDefinition* View = State ? State->View.Get() : nullptr;
+		const UContentViewBase* View = FBackend::Get().FindViewAsset(Path);
 		return View ? View->GetViewName() : FText::FromString(Path.GetAssetName());
 	}
 
 	FSlateIcon FContentViewSource::GetIcon()
 	{
-		const FViewState* State = FBackend::Get().FindView(Path);
-		const UContentViewDefinition* View = State ? State->View.Get() : nullptr;
+		const UContentViewBase* View = FBackend::Get().FindViewAsset(Path);
 		return FSlateIcon(FAppStyle::GetAppStyleSetName(),
 			View && !View->Icon.IsNone() ? View->Icon : FName(TEXT("ContentBrowser.TabIcon")));
 	}
@@ -94,7 +93,8 @@ namespace UE::ContentViews::Teds
 	void FContentViewSource::GetAssetViewInitParams(UE::Editor::ContentBrowser::FTableViewerInitParams& OutInitParams)
 	{
 		// Read by the engine's own host when this plugin's host is not the registered one: rows and columns, no filter bar.
-		if (const FViewState* State = FBackend::Get().FindView(Path))
+		const FBackend& Backend = FBackend::Get();
+		if (const FViewState* State = Backend.FindView(Path))
 		{
 			const UContentViewDefinition* View = State->View.Get();
 			const bool bTiles = View && View->Mode == EContentViewMode::Tiles;
@@ -102,6 +102,13 @@ namespace UE::ContentViews::Teds
 			OutInitParams.Columns = State->ShownColumns();
 			OutInitParams.CellWidgetPurpose = bTiles ? TilePurpose() : ListPurpose();
 			OutInitParams.TableViewMode = bTiles ? ETableViewMode::Tile : ETableViewMode::List;
+		}
+		else if (const FSceneViewState* Scene = Backend.FindSceneView(Path))
+		{
+			OutInitParams.QueryDescription = Scene->MakeRowQuery();
+			OutInitParams.Columns = Backend.SceneShownColumns();
+			OutInitParams.CellWidgetPurpose = ListPurpose();
+			OutInitParams.TableViewMode = ETableViewMode::List;
 		}
 	}
 
@@ -118,6 +125,7 @@ namespace UE::ContentViews::Teds
 		AllAssetsQuery = Storage->RegisterQuery(Select().ReadOnly<FAssetDataColumn_Experimental>().Compile());
 		Storage->RegisterCooperativeUpdate(CooperativeTaskName, ICoreProvider::ECooperativeTaskPriority::Medium,
 			[this](FTimespan Allowance) { CooperativeUpdate(Allowance); });
+		StartScene();
 
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
 		Registry.OnAssetAdded().AddRaw(this, &FBackend::HandleAssetAdded);
@@ -154,6 +162,12 @@ namespace UE::ContentViews::Teds
 		{
 			DropView(Path);
 		}
+		SceneViews.GetKeys(Paths);
+		for (const FSoftObjectPath& Path : Paths)
+		{
+			DropSceneView(Path);
+		}
+		StopScene();
 		Storage->UnregisterCooperativeUpdate(CooperativeTaskName);
 		Storage->UnregisterQuery(AllAssetsQuery);
 		Storage = nullptr;
@@ -184,16 +198,32 @@ namespace UE::ContentViews::Teds
 		return Views.Find(Path);
 	}
 
-	const FViewState* FBackend::FindViewOfSource(const UE::Editor::ContentBrowser::IContentSource* Source) const
+	TOptional<FSoftObjectPath> FBackend::FindPathOfSource(const UE::Editor::ContentBrowser::IContentSource* Source) const
 	{
 		for (const TWeakPtr<FContentViewSource>& Weak : Sources)
 		{
 			if (const TSharedPtr<FContentViewSource> Pinned = Weak.Pin(); Pinned && Pinned.Get() == Source)
 			{
-				return FindView(Pinned->Path);
+				return Pinned->Path;
 			}
 		}
-		return nullptr;
+		return {};
+	}
+
+	const FViewState* FBackend::FindViewOfSource(const UE::Editor::ContentBrowser::IContentSource* Source) const
+	{
+		const TOptional<FSoftObjectPath> Path = FindPathOfSource(Source);
+		return Path ? FindView(*Path) : nullptr;
+	}
+
+	const UContentViewBase* FBackend::FindViewAsset(const FSoftObjectPath& Path) const
+	{
+		if (const FViewState* State = FindView(Path))
+		{
+			return State->View.Get();
+		}
+		const FSceneViewState* Scene = FindSceneView(Path);
+		return Scene ? Scene->View.Get() : nullptr;
 	}
 
 	TArray<RowHandle> FBackend::RowsOf(const FViewState& View) const
@@ -271,6 +301,11 @@ namespace UE::ContentViews::Teds
 			{
 				DropView(Path);
 			}
+			SceneViews.GetKeys(Paths);
+			for (const FSoftObjectPath& Path : Paths)
+			{
+				DropSceneView(Path);
+			}
 			Pending.Reset();
 			PendingComputed.Reset();
 			bComputedDirty = false;
@@ -311,6 +346,18 @@ namespace UE::ContentViews::Teds
 				if (UContentViewDefinition* View = Cast<UContentViewDefinition>(Asset.GetAsset()))
 				{
 					BuildView(*View);
+				}
+			}
+		}
+		TArray<FAssetData> Scenes;
+		Registry.GetAssetsByClass(USceneCostView::StaticClass()->GetClassPathName(), Scenes, /*bSearchSubClasses*/ true);
+		for (const FAssetData& Asset : Scenes)
+		{
+			if (!SceneViews.Contains(Asset.GetSoftObjectPath()))
+			{
+				if (USceneCostView* View = Cast<USceneCostView>(Asset.GetAsset()))
+				{
+					BuildSceneView(*View);
 				}
 			}
 		}
@@ -376,7 +423,7 @@ namespace UE::ContentViews::Teds
 			}
 		}
 		State.RowQuery = Storage->RegisterQuery(State.MakeRowQuery());
-		RegisterSource(State);
+		RegisterSource(Path);
 		QueueAllAssetRows();
 		if (bExisted)
 		{
@@ -402,9 +449,8 @@ namespace UE::ContentViews::Teds
 		ViewChanged.Broadcast(Path);
 	}
 
-	void FBackend::RegisterSource(const FViewState& View)
+	void FBackend::RegisterSource(const FSoftObjectPath& Path)
 	{
-		const FSoftObjectPath Path = View.Path;
 		Registered.Add(Path);
 		// Registering again under the same name replaces the factory and tells every source bar to rebuild.
 		IContentBrowserSingleton::Get().RegisterContentSourceFactory(FName(Path.ToString()),
@@ -432,7 +478,10 @@ namespace UE::ContentViews::Teds
 		{
 			return;
 		}
-		const double End = FPlatformTime::Seconds() + Allowance.GetTotalSeconds();
+		const double Now = FPlatformTime::Seconds();
+		const double End = Now + Allowance.GetTotalSeconds();
+		// Placements first, within half the allowance: they are what a level edit changes.
+		UpdateScene(Now + Allowance.GetTotalSeconds() * 0.5);
 		while (!Pending.IsEmpty() && FPlatformTime::Seconds() < End)
 		{
 			TSet<RowHandle>::TIterator It = Pending.CreateIterator();
@@ -622,11 +671,22 @@ namespace UE::ContentViews::Teds
 	void FBackend::HandleAssetAdded(const FAssetData& Asset)
 	{
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
-		if (IsActive() && !Registry.IsLoadingAssets() && Asset.IsInstanceOf(UContentViewDefinition::StaticClass()))
+		if (!IsActive() || Registry.IsLoadingAssets())
+		{
+			return;
+		}
+		if (Asset.IsInstanceOf(UContentViewDefinition::StaticClass()))
 		{
 			if (UContentViewDefinition* View = Cast<UContentViewDefinition>(Asset.GetAsset()))
 			{
 				BuildView(*View);
+			}
+		}
+		else if (Asset.IsInstanceOf(USceneCostView::StaticClass()))
+		{
+			if (USceneCostView* Scene = Cast<USceneCostView>(Asset.GetAsset()))
+			{
+				BuildSceneView(*Scene);
 			}
 		}
 	}
@@ -637,14 +697,25 @@ namespace UE::ContentViews::Teds
 		{
 			DropView(Asset.GetSoftObjectPath());
 		}
+		if (SceneViews.Contains(Asset.GetSoftObjectPath()))
+		{
+			DropSceneView(Asset.GetSoftObjectPath());
+		}
 	}
 
 	void FBackend::HandleObjectChanged(UObject* Object, FPropertyChangedEvent& Event)
 	{
-		UContentViewDefinition* View = Cast<UContentViewDefinition>(Object);
-		if (View && IsActive() && Views.Contains(FSoftObjectPath(View)))
+		if (!IsActive())
+		{
+			return;
+		}
+		if (UContentViewDefinition* View = Cast<UContentViewDefinition>(Object); View && Views.Contains(FSoftObjectPath(View)))
 		{
 			BuildView(*View);
+		}
+		else if (USceneCostView* Scene = Cast<USceneCostView>(Object); Scene && SceneViews.Contains(FSoftObjectPath(Scene)))
+		{
+			BuildSceneView(*Scene);
 		}
 	}
 

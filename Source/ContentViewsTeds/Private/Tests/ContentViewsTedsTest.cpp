@@ -20,6 +20,13 @@
 #include "SContentViewsSource.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Tests/AutomationCommon.h"
+#include "Tests/AutomationEditorCommon.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
+#include "SceneCostView.h"
 #include "TedsAssetDataColumns.h"
 #include "TedsQueryStackExecutor.h"
 #include "UObject/Package.h"
@@ -610,6 +617,164 @@ bool FContentViewsTedsHeavyMeshesTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("and only meshes at or above 5000"), bAllHeavy);
 		return true;
 	}));
+	return true;
+}
+
+namespace
+{
+	/** Scene Cost's row for Mesh, or none. */
+	TOptional<UE::ContentViews::Teds::FSceneCostRow> TedsTestSceneRow(const USceneCostView& View, const TCHAR* Mesh)
+	{
+		for (const UE::ContentViews::Teds::FSceneCostRow& Row : UE::ContentViews::Teds::ReadSceneRows(View))
+		{
+			if (Row.Mesh == Mesh)
+			{
+				return Row;
+			}
+		}
+		return {};
+	}
+
+	/** Waits (up to 30 s) until the scene is counted and Ready holds, then runs Then; a timeout fails with What. */
+	void TedsTestWhenScene(FAutomationTestBase& Test, const FString& What, TFunction<bool()> Ready, TFunction<void()> Then)
+	{
+		TSharedRef<double> Start = MakeShared<double>(0.0);
+		Test.AddCommand(new FFunctionLatentCommand([&Test, What, Ready, Then, Start]()
+		{
+			*Start = *Start == 0.0 ? FPlatformTime::Seconds() : *Start;
+			const bool bReady = UE::ContentViews::Teds::IsSceneCaughtUp() && Ready();
+			if (!bReady && FPlatformTime::Seconds() - *Start < 30.0)
+			{
+				return false;
+			}
+			if (Test.TestTrue(*What, bReady))
+			{
+				Then();
+			}
+			return true;
+		}));
+	}
+
+	const TCHAR* const TedsTestCube = TEXT("/Engine/BasicShapes/Cube.Cube");
+	const TCHAR* const TedsTestSphere = TEXT("/Engine/BasicShapes/Sphere.Sphere");
+}
+
+/**
+ * Situation: a new level with five cubes placed, then one deleted; then an actor whose instanced component holds seven
+ * spheres, three more added the way PCG adds them (AddInstance, no Modify); then a budget at the cube's scene triangles.
+ * Why it matters: Scene Cost is how a designer sees what placed content costs; a count that misses an instance, keeps a
+ * deleted actor, or ignores instances PCG adds would point at the wrong mesh.
+ * Pass: the cube's row shows Placed 5 and Scene Triangles 5 x its triangles, then 4; the sphere's row counts 7, then 10
+ * in one instanced component; with the budget at the cube's scene triangles the spheres carry the alert and the cube does not.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsSceneCostTest,
+	"ContentViews.Teds.SceneCostCountsPlacementsInstancesAndTheBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsSceneCostTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TedsTestCube);
+	UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, TedsTestSphere);
+	UWorld* World = FAutomationEditorCommonUtils::CreateNewMap();
+	if (!TestNotNull(TEXT("the engine's cube"), Cube) || !TestNotNull(TEXT("and sphere"), Sphere) || !TestNotNull(TEXT("a new level"), World))
+	{
+		return false;
+	}
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	UPackage* Package = CreatePackage(*(Rows->Folder / TEXT("CV_SceneCostTest")));
+	USceneCostView* View = NewObject<USceneCostView>(Package, TEXT("CV_SceneCostTest"), RF_Public | RF_Standalone);
+	View->DisplayName = FText::FromString(TEXT("CV_SceneCostTest"));
+	View->TriangleBudget = 1000000000;
+	Rows->Register(View);
+
+	TSharedRef<TArray<TWeakObjectPtr<AActor>>> Cubes = MakeShared<TArray<TWeakObjectPtr<AActor>>>();
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(FVector(Index * 200.0, 0.0, 0.0), FRotator::ZeroRotator);
+		Actor->GetStaticMeshComponent()->SetStaticMesh(Cube);
+		Cubes->Add(Actor);
+	}
+
+	TedsTestWhenScene(*this, TEXT("five cubes are counted"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Row = TedsTestSceneRow(*View, TedsTestCube);
+		return Row && Row->Placed == 5;
+	}, [this, View, World, Cubes]()
+	{
+		const UE::ContentViews::Teds::FSceneCostRow Row = TedsTestSceneRow(*View, TedsTestCube).GetValue();
+		TestTrue(TEXT("a cube has triangles"), Row.Triangles > 0);
+		TestEqual(TEXT("scene triangles are placed x triangles"), Row.SceneTriangles, 5 * Row.Triangles);
+		TestEqual(TEXT("five static placements"), UE::ContentViews::Teds::ReadPlacements(FSoftObjectPath(TedsTestCube)).Num(), 5);
+		TestEqual(TEXT("the totals name the level counted"), UE::ContentViews::Teds::ReadSceneTotals().Level, World->GetMapName());
+		World->EditorDestroyActor((*Cubes)[0].Get(), /*bShouldModifyLevel*/ true);
+	});
+
+	TedsTestWhenScene(*this, TEXT("a deleted cube is no longer counted"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Row = TedsTestSceneRow(*View, TedsTestCube);
+		return Row && Row->Placed == 4;
+	}, [this, View, World, Sphere]()
+	{
+		const UE::ContentViews::Teds::FSceneCostRow Row = TedsTestSceneRow(*View, TedsTestCube).GetValue();
+		TestEqual(TEXT("four cubes' scene triangles"), Row.SceneTriangles, 4 * Row.Triangles);
+		AActor* Holder = World->SpawnActor<AActor>();
+		UInstancedStaticMeshComponent* Instances = NewObject<UInstancedStaticMeshComponent>(Holder, TEXT("Spheres"));
+		Instances->SetStaticMesh(Sphere);
+		Holder->SetRootComponent(Instances);
+		Holder->AddInstanceComponent(Instances);
+		Instances->RegisterComponent();
+		for (int32 Index = 0; Index < 7; ++Index)
+		{
+			Instances->AddInstance(FTransform(FVector(Index * 200.0, 500.0, 0.0)));
+		}
+	});
+
+	TedsTestWhenScene(*this, TEXT("seven spheres in one instanced component are counted"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Row = TedsTestSceneRow(*View, TedsTestSphere);
+		return Row && Row->Placed == 7;
+	}, [this]()
+	{
+		const TArray<UE::ContentViews::Teds::FScenePlacement> Placements = UE::ContentViews::Teds::ReadPlacements(FSoftObjectPath(TedsTestSphere));
+		if (TestEqual(TEXT("one component places them"), Placements.Num(), 1))
+		{
+			TestEqual(TEXT("an instanced one"), Placements[0].Kind, FString(TEXT("Instanced")));
+			TestEqual(TEXT("with seven instances"), Placements[0].Instances, 7);
+			// PCG adds instances like this: no Modify, so no sync tag; the engine's instance delegate brings the row back.
+			for (int32 Index = 0; Index < 3; ++Index)
+			{
+				CastChecked<UInstancedStaticMeshComponent>(Placements[0].Component.Get())->AddInstance(FTransform(FVector(Index * 200.0, 900.0, 0.0)));
+			}
+		}
+	});
+
+	TedsTestWhenScene(*this, TEXT("three instances added later are counted"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Row = TedsTestSceneRow(*View, TedsTestSphere);
+		return Row && Row->Placed == 10;
+	}, [this, View]()
+	{
+		TestEqual(TEXT("the totals hold both meshes' instances"), UE::ContentViews::Teds::ReadSceneTotals().Instances, int64(14));
+		// The budget at the cube's own scene triangles: the cube meets it, the ten spheres pass it.
+		View->TriangleBudget = TedsTestSceneRow(*View, TedsTestCube)->SceneTriangles;
+		FPropertyChangedEvent Changed(nullptr);
+		FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(View, Changed);
+	});
+
+	TedsTestWhenScene(*this, TEXT("the budget's alert is written"), [View]()
+	{
+		const TOptional<UE::ContentViews::Teds::FSceneCostRow> Row = TedsTestSceneRow(*View, TedsTestSphere);
+		return Row && !Row->Alert.IsEmpty();
+	}, [this, View, Rows]()
+	{
+		const UE::ContentViews::Teds::FSceneCostRow Cube = TedsTestSceneRow(*View, TedsTestCube).GetValue();
+		const UE::ContentViews::Teds::FSceneCostRow Sphere = TedsTestSceneRow(*View, TedsTestSphere).GetValue();
+		TestFalse(TEXT("the sphere is not Nanite"), Sphere.bNanite);
+		TestTrue(*FString::Printf(TEXT("the sphere's alert names the budget: %s"), *Sphere.Alert), Sphere.Alert.Contains(TEXT("over the budget of")));
+		TestTrue(*FString::Printf(TEXT("the cube, at the budget (%lld), has none: %s"), Cube.SceneTriangles, *Cube.Alert), Cube.Alert.IsEmpty());
+		const TArray<UE::ContentViews::Teds::FSceneCostRow> All = UE::ContentViews::Teds::ReadSceneRows(*View);
+		TestTrue(TEXT("most scene triangles first"), All.Num() == 2 && All[0].Mesh == TedsTestSphere);
+	});
 	return true;
 }
 

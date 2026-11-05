@@ -16,6 +16,7 @@ class UContentViewsTedsFactory : public UEditorDataStorageFactory
 
 public:
 	virtual uint8 GetOrder() const override { return 200; }
+	virtual void RegisterTables(UE::Editor::DataStorage::ICoreProvider& DataStorage) override;
 	virtual void RegisterQueries(UE::Editor::DataStorage::ICoreProvider& DataStorage) override;
 	virtual void RegisterWidgetPurposes(UE::Editor::DataStorage::IUiProvider& DataStorageUi) const override;
 	virtual void RegisterWidgetConstructors(UE::Editor::DataStorage::ICoreProvider& DataStorage,

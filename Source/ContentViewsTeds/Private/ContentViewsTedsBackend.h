@@ -4,9 +4,16 @@
 #include "ContentSources/IContentSource.h"
 #include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
+#include "ContentViewsTeds.h"
 #include "DataStorage/Handles.h"
 #include "Elements/Framework/TypedElementQueryBuilder.h"
+#include "InstancedStaticMeshDelegates.h"
 
+class AActor;
+class UInstancedStaticMeshComponent;
+class ULevel;
+class USceneCostView;
+class UWorld;
 struct FAssetData;
 struct FPropertyChangedEvent;
 
@@ -69,6 +76,19 @@ namespace UE::ContentViews::Teds
 		UE::Editor::DataStorage::FQueryDescription MakeRowQuery() const;
 	};
 
+	/** A Scene Cost view as the backend holds it: one row per placed mesh, in the Scene Cost table. */
+	struct FSceneViewState
+	{
+		FSoftObjectPath Path;
+		TWeakObjectPtr<USceneCostView> View;
+		/** The tag every row of the view carries. */
+		const UScriptStruct* RowTag = nullptr;
+		/** Mesh -> its row. */
+		TMap<FSoftObjectPath, RowHandle> Rows;
+
+		UE::Editor::DataStorage::FQueryDescription MakeRowQuery() const;
+	};
+
 	/** A view's Content Source. The factory makes one per Content Browser, so several can stand for one view. */
 	class FContentViewSource final : public UE::Editor::ContentBrowser::IContentSource
 	{
@@ -128,12 +148,66 @@ namespace UE::ContentViews::Teds
 		/** Every source the factory has handed out, for FindViewOfSource. */
 		TArray<TWeakPtr<FContentViewSource>> Sources;
 
+		/** The view asset a source stands for, of either archetype. */
+		const UContentViewBase* FindViewAsset(const FSoftObjectPath& Path) const;
+		TOptional<FSoftObjectPath> FindPathOfSource(const UE::Editor::ContentBrowser::IContentSource* Source) const;
+
+		// Scene Cost (ContentViewsTedsScene.cpp): the Join archetype.
+
+		/** The table every Scene Cost row is in; registered by the factory. */
+		inline static const FName SceneTableName = TEXT("ContentViews_SceneMeshes");
+		inline static const FName SceneMeshColumn = TEXT("Mesh");
+		inline static const FName SceneTrianglesColumn = TEXT("SceneTriangles");
+
+		/** One placed mesh, counted. */
+		struct FSceneMesh
+		{
+			FString Name;
+			int64 Placed = 0;
+			int32 Components = 0;
+			int64 Triangles = 0;
+			bool bNanite = false;
+			int64 Memory = 0;
+		};
+
+		const FSceneViewState* FindSceneView(const FSoftObjectPath& Path) const;
+		TArray<RowHandle> RowsOf(const FSceneViewState& View) const;
+		const FColumnSlot* FindSceneSlot(FName Name) const;
+		TArray<TWeakObjectPtr<const UScriptStruct>> SceneShownColumns() const;
+		const FSceneTotals& GetSceneTotals() const { return SceneTotals; }
+		TArray<FScenePlacement> PlacementsOf(const FSoftObjectPath& Mesh) const;
+		bool IsCountingScene() const;
+		bool IsSceneCaughtUp() const;
+
+		/** From the processor: component rows that synced from the world this frame. */
+		void NoteComponentRows(TConstArrayView<RowHandle> Rows);
+		/** Something placed, removed or changed: count again once things settle. */
+		void NoteSceneChanged();
+
+		/** The scene was counted and every Scene Cost view's rows written. */
+		FSimpleMulticastDelegate& OnSceneCounted() { return SceneCounted; }
+
 	private:
 		void ApplySetting();
 		void RefreshViews();
 		void BuildView(UContentViewDefinition& View);
 		void DropView(const FSoftObjectPath& Path);
-		void RegisterSource(const FViewState& View);
+		void RegisterSource(const FSoftObjectPath& Path);
+
+		void StartScene();
+		void StopScene();
+		void BuildSceneView(USceneCostView& View);
+		void DropSceneView(const FSoftObjectPath& Path);
+		void QueueAllComponentRows();
+		void UpdateScene(double End);
+		void SyncPlacement(RowHandle Row);
+		void CountScene();
+		void WriteSceneRows(FSceneViewState& View);
+		void HandleInstancesChanged(UInstancedStaticMeshComponent* Component,
+			TArrayView<const FInstancedStaticMeshDelegates::FInstanceIndexUpdateData> Updates);
+		void HandleActorChanged(AActor* Actor);
+		void HandleMapChange(uint32 Flags);
+		void HandleLevelChanged(ULevel* Level, UWorld* World);
 		void QueueAllAssetRows();
 		void CooperativeUpdate(FTimespan Allowance);
 		void UpdateRow(RowHandle Row, bool bComputedOnly);
@@ -157,5 +231,18 @@ namespace UE::ContentViews::Teds
 		TSet<TPair<RowHandle, FName>> Alerted;
 		TSet<TPair<const UScriptStruct*, FName>> CellWidgets;
 		FOnViewChanged ViewChanged;
+
+		TMap<FSoftObjectPath, FSceneViewState> SceneViews;
+		TArray<FColumnSlot> SceneSlots;
+		UE::Editor::DataStorage::TableHandle SceneTable = UE::Editor::DataStorage::InvalidTableHandle;
+		QueryHandle PlacementQuery = UE::Editor::DataStorage::InvalidQueryHandle;
+		QueryHandle ComponentQuery = UE::Editor::DataStorage::InvalidQueryHandle;
+		TSet<RowHandle> PendingComponents;
+		TSet<TWeakObjectPtr<UInstancedStaticMeshComponent>> PendingInstanced;
+		bool bSceneDirty = false;
+		double SceneChangedAt = 0.0;
+		TMap<FSoftObjectPath, FSceneMesh> SceneMeshes;
+		FSceneTotals SceneTotals;
+		FSimpleMulticastDelegate SceneCounted;
 	};
 }

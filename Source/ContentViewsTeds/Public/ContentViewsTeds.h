@@ -3,7 +3,51 @@
 #include "CoreMinimal.h"
 #include "ContentViewQuery.h"
 
+class AActor;
 class UContentViewDefinition;
+class USceneCostView;
+class UStaticMeshComponent;
+
+namespace UE::ContentViews::Teds
+{
+	/** What Scene Cost counted in the level open in the editor. */
+	struct FSceneTotals
+	{
+		FString Level;
+		int32 LoadedActors = 0;
+		int32 Meshes = 0;
+		int32 Components = 0;
+		int64 Instances = 0;
+		int64 SceneTriangles = 0;
+		/** The scene triangles of meshes that are not Nanite. */
+		int64 NonNaniteTriangles = 0;
+	};
+
+	/** One component placing a mesh. */
+	struct FScenePlacement
+	{
+		TWeakObjectPtr<AActor> Actor;
+		TWeakObjectPtr<UStaticMeshComponent> Component;
+		FString ActorLabel;
+		FString ComponentName;
+		/** Static, Instanced or Hierarchical instanced. */
+		FString Kind;
+		/** The World Partition grid the actor streams in, Always loaded, or - in a level without World Partition. */
+		FString Cell;
+		int32 Instances = 0;
+	};
+
+	/** A Scene Cost row read back from TEDS. */
+	struct FSceneCostRow
+	{
+		FString Mesh;
+		int64 Placed = 0;
+		int64 Triangles = 0;
+		int64 SceneTriangles = 0;
+		bool bNanite = false;
+		FString Alert;
+	};
+}
 
 /**
  * What the TEDS backend has built, read back for tests and tools. Every TEDS call of the plugin is in this module; these
@@ -31,4 +75,16 @@ namespace UE::ContentViews::Teds
 
 	/** The message of each alert a row of View carries, by asset path. */
 	CONTENTVIEWSTEDS_API TMap<FString, FString> ReadAlerts(const UContentViewDefinition& View);
+
+	/** Whether every placement change seen so far has been counted. */
+	CONTENTVIEWSTEDS_API bool IsSceneCaughtUp();
+
+	/** The last count's totals. */
+	CONTENTVIEWSTEDS_API FSceneTotals ReadSceneTotals();
+
+	/** View's rows as TEDS holds them, most scene triangles first. */
+	CONTENTVIEWSTEDS_API TArray<FSceneCostRow> ReadSceneRows(const USceneCostView& View);
+
+	/** The components placing Mesh in the open level, most instances first. */
+	CONTENTVIEWSTEDS_API TArray<FScenePlacement> ReadPlacements(const FSoftObjectPath& Mesh);
 }

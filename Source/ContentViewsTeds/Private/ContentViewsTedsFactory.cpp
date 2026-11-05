@@ -8,7 +8,11 @@
 #include "DataStorage/Features.h"
 #include "Elements/Framework/TypedElementAttributeBinding.h"
 #include "Elements/Framework/TypedElementQueryBuilder.h"
+#include "Components/StaticMeshComponent.h"
+#include "Elements/Columns/TypedElementCompatibilityColumns.h"
+#include "Elements/Columns/TypedElementMiscColumns.h"
 #include "SContentViewsSource.h"
+#include "SSceneCostView.h"
 #include "TedsAssetDataColumns.h"
 #include "TedsQueryNode.h"
 #include "TedsRowQueryResultsNode.h"
@@ -62,8 +66,52 @@ namespace
 	};
 }
 
+void UContentViewsTedsFactory::RegisterTables(ICoreProvider& DataStorage)
+{
+	DataStorage.RegisterTable<FContentViewSceneMeshTag>(UE::ContentViews::Teds::FBackend::SceneTableName);
+}
+
 void UContentViewsTedsFactory::RegisterQueries(ICoreProvider& DataStorage)
 {
+	// Scene Cost: a row syncs from the world when its object is added, loaded or modified, for one frame. Only static mesh
+	// components are noted; the cooperative task reads each one's mesh and instances into its placement column.
+	DataStorage.RegisterQuery(
+		Select(
+			TEXT("Content Views: note synced static mesh components"),
+			FProcessor(EQueryTickPhase::DuringPhysics, DataStorage.GetQueryTickGroupName(EQueryTickGroups::Update))
+				.SetExecutionMode(EExecutionMode::GameThread),
+			[](IQueryContext& Context, const RowHandle* Rows, const FTypedElementUObjectColumn* Objects)
+			{
+				UE::ContentViews::Teds::FBackend& Backend = UE::ContentViews::Teds::FBackend::Get();
+				if (!Backend.IsCountingScene())
+				{
+					return;
+				}
+				TArray<RowHandle, TInlineAllocator<32>> Components;
+				for (uint32 Index = 0; Index < Context.GetRowCount(); ++Index)
+				{
+					if (Cast<UStaticMeshComponent>(Objects[Index].Object.Get()))
+					{
+						Components.Add(Rows[Index]);
+					}
+				}
+				Backend.NoteComponentRows(Components);
+			})
+		.Where()
+			.All<FTypedElementSyncFromWorldTag>()
+		.Compile());
+
+	// A component row that goes (its actor deleted, unloaded or garbage collected) takes its placement with it.
+	DataStorage.RegisterQuery(
+		Select(
+			TEXT("Content Views: a placement went"),
+			FObserver::OnRemove<FContentViewPlacementColumn>().SetExecutionMode(EExecutionMode::GameThread),
+			[](IQueryContext& Context, RowHandle Row, const FContentViewPlacementColumn& Placement)
+			{
+				UE::ContentViews::Teds::FBackend::Get().NoteSceneChanged();
+			})
+		.Compile());
+
 	// Gated on the tag TedsAssetData stamps on a new or changed asset row for one frame, so it runs only on changes.
 	DataStorage.RegisterQuery(
 		Select(
@@ -126,9 +174,17 @@ TSharedPtr<SWidget> FContentViewsAssetViewConstructor::CreateWidget(ICoreProvide
 	{
 		return SNullWidget::NullWidget;
 	}
-	if (const UE::ContentViews::Teds::FViewState* View = UE::ContentViews::Teds::FBackend::Get().FindViewOfSource(Source.Get()))
+	const UE::ContentViews::Teds::FBackend& Backend = UE::ContentViews::Teds::FBackend::Get();
+	if (const TOptional<FSoftObjectPath> Path = Backend.FindPathOfSource(Source.Get()))
 	{
-		return SNew(SContentViewsSource, View->Path);
+		if (Backend.FindView(*Path))
+		{
+			return SNew(SContentViewsSource, *Path);
+		}
+		if (Backend.FindSceneView(*Path))
+		{
+			return SNew(SSceneCostView, *Path);
+		}
 	}
 	UE::Editor::ContentBrowser::FTableViewerInitParams Params;
 	Source->GetAssetViewInitParams(Params);
