@@ -114,8 +114,8 @@ public:
 		UAssetManager::CallOrRegister_OnAssetManagerCreated(FSimpleMulticastDelegate::FDelegate::CreateLambda([]()
 		{
 			// Editor only, so the cook never takes a view.
-			UAssetManager::Get().ScanPathForPrimaryAssets(UContentViewDefinition::StaticAssetType(), TEXT("/Game"),
-				UContentViewDefinition::StaticClass(), /*bHasBlueprintClasses*/ false, /*bIsEditorOnly*/ true,
+			UAssetManager::Get().ScanPathForPrimaryAssets(UContentViewBase::StaticAssetType(), TEXT("/Game"),
+				UContentViewBase::StaticClass(), /*bHasBlueprintClasses*/ false, /*bIsEditorOnly*/ true,
 				/*bForceSynchronousScan*/ false);
 		}));
 
@@ -126,13 +126,13 @@ public:
 		}
 		else
 		{
-			FCoreDelegates::OnPostEngineInit.AddRaw(this, &FContentViewsModule::RegisterToolset);
+			FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FContentViewsModule::RegisterToolset);
 		}
 	}
 
 	virtual void ShutdownModule() override
 	{
-		FCoreDelegates::OnPostEngineInit.RemoveAll(this);
+		FCoreDelegates::GetOnPostEngineInit().RemoveAll(this);
 		OpenCommand.Reset();
 		if (FSlateApplication::IsInitialized())
 		{

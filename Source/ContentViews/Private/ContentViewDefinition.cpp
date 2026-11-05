@@ -16,20 +16,26 @@ FString FContentViewFilter::Describe() const
 		*Ops->GetDisplayNameTextByValue(static_cast<int64>(Operator)).ToString(), *Value);
 }
 
-FPrimaryAssetType UContentViewDefinition::StaticAssetType()
+FPrimaryAssetType UContentViewBase::StaticAssetType()
 {
 	static const FPrimaryAssetType Type(TEXT("ContentView"));
 	return Type;
 }
 
-FPrimaryAssetId UContentViewDefinition::GetPrimaryAssetId() const
+FPrimaryAssetId UContentViewBase::GetPrimaryAssetId() const
 {
 	return FPrimaryAssetId(StaticAssetType(), GetFName());
 }
 
-FText UContentViewDefinition::GetViewName() const
+FText UContentViewBase::GetViewName() const
 {
 	return DisplayName.IsEmpty() ? FText::FromName(GetFName()) : DisplayName;
+}
+
+FString UContentViewDefinition::GetColumnLabel(FName Column) const
+{
+	const FText* Label = ColumnLabels.Find(Column);
+	return Label && !Label->IsEmpty() ? Label->ToString() : FName::NameToDisplayString(Column.ToString(), /*bIsBool*/ false);
 }
 
 FContentViewSpec UContentViewDefinition::ToSpec() const

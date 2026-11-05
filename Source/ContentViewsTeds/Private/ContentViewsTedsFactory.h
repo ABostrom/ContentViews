@@ -17,6 +17,7 @@ class UContentViewsTedsFactory : public UEditorDataStorageFactory
 public:
 	virtual uint8 GetOrder() const override { return 200; }
 	virtual void RegisterQueries(UE::Editor::DataStorage::ICoreProvider& DataStorage) override;
+	virtual void RegisterWidgetPurposes(UE::Editor::DataStorage::IUiProvider& DataStorageUi) const override;
 	virtual void RegisterWidgetConstructors(UE::Editor::DataStorage::ICoreProvider& DataStorage,
 		UE::Editor::DataStorage::IUiProvider& DataStorageUi) const override;
 	virtual void PostRegister(UE::Editor::DataStorage::ICoreProvider& DataStorage) override;
@@ -52,8 +53,33 @@ struct FContentViewsCellConstructor : public FSimpleWidgetConstructor
 		UE::Editor::DataStorage::RowHandle WidgetRow, const UE::Editor::DataStorage::FMetaDataView& Arguments) override;
 };
 
+/**
+ * A view column's header (purpose ContentViews.Header, which falls back to General.Header): the column type's display
+ * name, and a wide column for the row's name, so names are not cut short. Sorting is left to the cell's sorters.
+ */
+USTRUCT()
+struct FContentViewsHeaderConstructor : public FSimpleWidgetConstructor
+{
+	GENERATED_BODY()
+
+	FContentViewsHeaderConstructor() : FSimpleWidgetConstructor(StaticStruct()) {}
+
+	virtual TSharedPtr<SWidget> CreateWidget(UE::Editor::DataStorage::ICoreProvider* DataStorage,
+		UE::Editor::DataStorage::IUiProvider* DataStorageUi, UE::Editor::DataStorage::RowHandle TargetRow,
+		UE::Editor::DataStorage::RowHandle WidgetRow, const UE::Editor::DataStorage::FMetaDataView& Arguments) override;
+	virtual TArray<TSharedPtr<const UE::Editor::DataStorage::FColumnSorterInterface>> ConstructColumnSorters(
+		UE::Editor::DataStorage::ICoreProvider* DataStorage, UE::Editor::DataStorage::IUiProvider* DataStorageUi,
+		const UE::Editor::DataStorage::FMetaDataView& Arguments) override { return {}; }
+};
+
 namespace UE::ContentViews::Teds
 {
-	/** Registers the cell widget for the column Template generates under Identifier. */
+	/** The purpose a view's table builds its headers with. */
+	UE::Editor::DataStorage::IUiProvider::FPurposeID HeaderPurpose();
+
+	/** Metadata on a column type that makes its header wide (a name). */
+	extern const TCHAR* const WideColumnMeta;
+
+	/** Registers the cell and header widgets for the column Template generates under Identifier. */
 	void RegisterContentViewCell(UE::Editor::DataStorage::IUiProvider& Ui, const UScriptStruct& Template, FName Identifier);
 }

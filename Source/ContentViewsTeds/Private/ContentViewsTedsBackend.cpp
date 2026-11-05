@@ -8,7 +8,6 @@
 #include "ContentViewsSettings.h"
 #include "ContentViewsTedsColumns.h"
 #include "ContentViewsTedsFactory.h"
-#include "Elements/Columns/TypedElementSlateWidgetColumns.h"
 #include "Elements/Framework/TypedElementQueryContext.h"
 #include "Elements/Interfaces/TypedElementDataStorageInterface.h"
 #include "Elements/Interfaces/TypedElementDataStorageUiInterface.h"
@@ -50,12 +49,6 @@ namespace UE::ContentViews::Teds
 				return FLinearColor::FromSRGBColor(FColor::FromHex(Items[0]));
 			}
 			return {};
-		}
-
-		/** The column's words as a header shows them: TeamColour reads Team Colour. */
-		FString HeaderOf(FName Column)
-		{
-			return FName::NameToDisplayString(Column.ToString(), /*bIsBool*/ false);
 		}
 	}
 
@@ -255,10 +248,9 @@ namespace UE::ContentViews::Teds
 			}
 			break;
 		case EColumnKind::Colour:
-			if (const FSlateColorColumn* Colour = Storage->GetColumn<FSlateColorColumn>(Row))
+			if (const FContentViewColourColumn* Colour = Storage->GetColumn<FContentViewColourColumn>(Row, Slot.Name))
 			{
-				const FColor Shown = Colour->Color.GetSpecifiedColor().ToFColorSRGB();
-				return FContentViewValue::OfString(FString::Printf(TEXT("#%02X%02X%02X"), Shown.R, Shown.G, Shown.B));
+				return FContentViewValue::OfString(Colour->Hex);
 			}
 			break;
 		}
@@ -345,6 +337,7 @@ namespace UE::ContentViews::Teds
 		{
 			FColumnSlot& Slot = State.Columns.AddDefaulted_GetRef();
 			Slot.Name = View.Columns[Index];
+			Slot.Label = View.GetColumnLabel(Slot.Name);
 			Slot.Reader = GetColumn(Slot.Name);
 			Slot.bComputed = IsColumnRegistered(Slot.Name);
 			const EContentViewValueType Type = Infos.IsValidIndex(Index) ? Infos[Index].Type : EContentViewValueType::String;
@@ -357,7 +350,7 @@ namespace UE::ContentViews::Teds
 			else if (Slot.Reader->GetShows() == EContentViewColumnShows::Colour)
 			{
 				Slot.Kind = EColumnKind::Colour;
-				Slot.Type = FSlateColorColumn::StaticStruct();
+				Template = FContentViewColourColumn::StaticStruct();
 			}
 			else if (Type == EContentViewValueType::Number)
 			{
@@ -378,7 +371,7 @@ namespace UE::ContentViews::Teds
 			{
 				Slot.Type = Storage->GenerateDynamicColumn({.TemplateType = Template, .Identifier = Slot.Name});
 				// The header reads the column type's display name; a generated type would show Template::Name.
-				const_cast<UScriptStruct*>(Slot.Type)->SetMetaData(TEXT("DisplayName"), *HeaderOf(Slot.Name));
+				const_cast<UScriptStruct*>(Slot.Type)->SetMetaData(TEXT("DisplayName"), *Slot.Label);
 				EnsureCellWidget(*Template, Slot.Name);
 			}
 		}
@@ -577,15 +570,15 @@ namespace UE::ContentViews::Teds
 		case EColumnKind::Colour:
 		{
 			const FLinearColor Colour = FirstColour(Value).GetValue();
-			if (FSlateColorColumn* Chip = Storage->GetColumn<FSlateColorColumn>(Row))
+			const FString Hex = TEXT("#") + Colour.ToFColorSRGB().ToHex().Left(6);
+			if (FContentViewColourColumn* Chip = Storage->GetColumn<FContentViewColourColumn>(Row, Slot.Name))
 			{
-				Chip->Color = Colour;
+				Chip->Colour = Colour;
+				Chip->Hex = Hex;
 			}
 			else
 			{
-				FSlateColorColumn New;
-				New.Color = Colour;
-				Storage->AddColumn(Row, MoveTemp(New));
+				Storage->AddColumn(Row, Slot.Name, FContentViewColourColumn{.Colour = Colour, .Hex = Hex});
 			}
 			break;
 		}
@@ -599,7 +592,7 @@ namespace UE::ContentViews::Teds
 		const FName AlertName(*FString::Printf(TEXT("ContentViews.%s"), *Slot.Name.ToString()));
 		const TPair<RowHandle, FName> Key(Row, AlertName);
 		const bool bAlerted = Alerted.Contains(Key);
-		const FText Message = FText::Format(LOCTEXT("Alert", "{0}: {1}"), FText::FromString(HeaderOf(Slot.Name)), FText::FromString(Problem));
+		const FText Message = FText::Format(LOCTEXT("Alert", "{0}: {1}"), FText::FromString(Slot.Label), FText::FromString(Problem));
 		if (!Problem.IsEmpty() && !bAlerted)
 		{
 			Alerts::AddAlert(*Storage, Row, AlertName, Message, UE::Editor::DataStorage::Columns::FAlertColumnType::Warning);

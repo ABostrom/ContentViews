@@ -1,7 +1,11 @@
 #include "SContentViewsSource.h"
 
+#include "Columns/SlateDelegateColumns.h"
+#include "ContentViewAssetActions.h"
 #include "ContentViewsTeds.h"
 #include "ContentViewsTedsBackend.h"
+#include "ContentViewsTedsFactory.h"
+#include "TedsRowOrderInversionNode.h"
 #include "Elements/Framework/TypedElementMetaData.h"
 #include "Elements/Interfaces/TypedElementDataStorageInterface.h"
 #include "Elements/Interfaces/TypedElementDataStorageUiInterface.h"
@@ -106,7 +110,7 @@ void SContentViewsSource::Build()
 		// A shape filter is a query: the rows whose table holds the column.
 		const QueryHandle Query = Storage->RegisterQuery(Select().ReadOnly<FAssetDataColumn_Experimental>().Where().All(Slot.Type).Compile());
 		FilterQueries.Add(Query);
-		const FText Label = FText::Format(LOCTEXT("Has", "Has {0}"), FText::FromString(FName::NameToDisplayString(Slot.Name.ToString(), false)));
+		const FText Label = FText::Format(LOCTEXT("Has", "Has {0}"), FText::FromString(Slot.Label));
 		Filters.Add(MakeShared<FTedsFilter>(FName(*(TEXT("Has.") + Slot.Name.ToString())), Label, Label, NAME_None, ShapeCategory, Query));
 	}
 	const TSharedRef<STedsFilterBar> FilterBar = SNew(STedsFilterBar)
@@ -115,13 +119,26 @@ void SContentViewsSource::Build()
 		.OutFilteredNode(&Filtered)
 		.Filters(Filters);
 
+	const FColumnSlot* SortSlot = State->FindColumn(View->DefaultSort.Column.IsNone() ? FName(TEXT("Name")) : View->DefaultSort.Column);
 	TSharedPtr<SWidget> Body;
 	if (View->Mode == EContentViewMode::Tiles)
 	{
+		// A tile viewer has no header to sort by, so the view's default sort is a sort node in its stack.
+		Shown = Filtered;
+		TArray<TSharedPtr<const FColumnSorterInterface>> Sorters;
+		if (SortSlot)
+		{
+			Backend.GetUi()->GeneratePropertySorters(Sorters, TArray<TWeakObjectPtr<const UScriptStruct>>{SortSlot->Type});
+		}
+		if (!Sorters.IsEmpty())
+		{
+			Shown = MakeShared<QueryStack::FRowOrderInversionNode>(MakeShared<QueryStack::FRowSortNode>(*Storage, Filtered, Sorters[0]),
+				View->DefaultSort.bDescending);
+		}
 		// The Content Browser's own tile (thumbnail and name), sized as its tile view sizes it.
 		constexpr float ThumbnailSize = 128.f;
 		const TSharedRef<STedsTileViewer> Tiles = SNew(STedsTileViewer)
-			.QueryStack(Filtered)
+			.QueryStack(Shown)
 			.WidgetPurpose(IUiProvider::FPurposeInfo("ContentBrowser", "TileLabel", NAME_None).GeneratePurposeID())
 			.TileStyle(&FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("ContentBrowser.AssetListView.TileTableRow"))
 			.ItemAlignment(EListItemAlignment::LeftAligned)
@@ -133,10 +150,11 @@ void SContentViewsSource::Build()
 		Storage->AddColumn(TileRow, FSizeValueColumn_Experimental{.SizeValue = ThumbnailSize});
 		Storage->AddColumn(TileRow, FThumbnailEditModeColumn_Experimental{.IsEditModeToggled = false});
 		Body = Tiles;
+		Viewer = Tiles;
 	}
 	else
 	{
-		const FColumnSlot* SortSlot = State->FindColumn(View->DefaultSort.Column.IsNone() ? FName(TEXT("Name")) : View->DefaultSort.Column);
+		Shown = Filtered;
 		TSharedPtr<FColumnMetaData> SortMeta;
 		TWeakObjectPtr<const UScriptStruct> SortType;
 		if (SortSlot)
@@ -145,16 +163,20 @@ void SContentViewsSource::Build()
 			SortMeta = MakeShared<FColumnMetaData>(SortSlot->Type, FColumnMetaData::EFlags::None);
 			SortMeta->AddOrSetMutableData("bColumnInitialSortIsAscending", !View->DefaultSort.bDescending);
 		}
-		Body = SNew(STedsTableViewer)
+		const TSharedRef<STedsTableViewer> Table = SNew(STedsTableViewer)
 			.TableViewerIdentifier(FName(*(TEXT("ContentViews.") + ViewPath.GetAssetName())))
 			.QueryStack(Filtered)
 			.Columns(State->ShownColumns())
 			.CellWidgetPurpose(IUiProvider::FPurposeInfo("ContentBrowser", "RowLabel", NAME_None).GeneratePurposeID())
+			.HeaderWidgetPurpose(UE::ContentViews::Teds::HeaderPurpose())
 			.PrimaryColumn(SortType)
 			.ColumnMetaData(SortMeta ? TArray<TSharedPtr<FColumnMetaData>>{SortMeta} : TArray<TSharedPtr<FColumnMetaData>>())
 			.ListSelectionMode(ESelectionMode::Multi)
 			.EmptyRowsMessage(LOCTEXT("NoRows", "No assets match."));
+		Body = Table;
+		Viewer = Table;
 	}
+	BindRowActions();
 
 	ChildSlot
 	[
@@ -180,6 +202,51 @@ void SContentViewsSource::Build()
 			Body.ToSharedRef()
 		]
 	];
+}
+
+TArray<FAssetData> SContentViewsSource::GetSelectedAssets() const
+{
+	TArray<FAssetData> Assets;
+	ICoreProvider* Storage = FBackend::Get().GetStorage();
+	if (Viewer && Storage)
+	{
+		Viewer->ForEachSelectedRow([Storage, &Assets](RowHandle Row)
+		{
+			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
+			{
+				Assets.Add(Asset->AssetData);
+			}
+		});
+	}
+	return Assets;
+}
+
+void SContentViewsSource::BindRowActions()
+{
+	// The viewers bind their list's double-click and context menu to these columns on their widget row.
+	ICoreProvider* Storage = FBackend::Get().GetStorage();
+	const RowHandle WidgetRow = Viewer->GetWidgetRowHandle();
+	TWeakPtr<SContentViewsSource> Weak = StaticCastSharedRef<SContentViewsSource>(AsShared());
+	if (FWidgetDoubleClickedColumn* DoubleClick = Storage->GetColumn<FWidgetDoubleClickedColumn>(WidgetRow))
+	{
+		DoubleClick->OnMouseButtonDoubleClick = MakeShared<FWidgetDoubleClickedColumn::FOnMouseButtonDoubleClick>();
+		DoubleClick->OnMouseButtonDoubleClick->BindLambda([Storage](FTedsRowHandle Row)
+		{
+			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
+			{
+				UE::ContentViews::OpenAssets({Asset->AssetData});
+			}
+		});
+	}
+	if (FWidgetContextMenuColumn* Menu = Storage->GetColumn<FWidgetContextMenuColumn>(WidgetRow))
+	{
+		Menu->OnContextMenuOpening = MakeShared<FOnContextMenuOpening>();
+		Menu->OnContextMenuOpening->BindLambda([Weak]() -> TSharedPtr<SWidget>
+		{
+			const TSharedPtr<SContentViewsSource> Source = Weak.Pin();
+			return Source ? UE::ContentViews::MakeAssetContextMenu(Source->GetSelectedAssets()) : nullptr;
+		});
+	}
 }
 
 namespace UE::ContentViews::Teds

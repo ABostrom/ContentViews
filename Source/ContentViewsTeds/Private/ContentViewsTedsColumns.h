@@ -23,6 +23,23 @@ struct FContentViewNumberColumn : public FEditorDataStorageColumn
 	FString Display;
 };
 
+/**
+ * A colour column of a view, one type per column name: the header reads the column's own name, and a view can show more
+ * than one (the stock FSlateColorColumn allows one per row and reads "Color").
+ */
+USTRUCT(meta = (EditorDataStorage_DynamicColumnTemplate))
+struct FContentViewColourColumn : public FEditorDataStorageColumn
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FLinearColor Colour = FLinearColor::White;
+
+	/** #RRGGBB, so the column sorts and searches by its value. */
+	UPROPERTY(meta = (Sortable, Searchable))
+	FString Hex;
+};
+
 /** A computed text column of a view: the value (paths for references) and the words it shows. */
 USTRUCT(meta = (EditorDataStorage_DynamicColumnTemplate))
 struct FContentViewStringColumn : public FEditorDataStorageColumn

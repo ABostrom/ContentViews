@@ -12,6 +12,9 @@
 #include "TedsAssetDataColumns.h"
 #include "TedsQueryNode.h"
 #include "TedsRowQueryResultsNode.h"
+#include "Columns/SlateHeaderColumns.h"
+#include "Widgets/Colors/SColorBlock.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/STedsTableViewer.h"
 #include "Widgets/STedsTileViewer.h"
 #include "Widgets/Text/STextBlock.h"
@@ -76,10 +79,29 @@ void UContentViewsTedsFactory::RegisterQueries(ICoreProvider& DataStorage)
 		.Compile());
 }
 
+void UContentViewsTedsFactory::RegisterWidgetPurposes(IUiProvider& DataStorageUi) const
+{
+	DataStorageUi.RegisterWidgetPurpose(IUiProvider::FPurposeInfo("ContentViews", "Header", NAME_None,
+		IUiProvider::EPurposeType::UniqueByNameAndColumn, NSLOCTEXT("ContentViewsTeds", "HeaderPurpose", "A Content View table's column headers."),
+		IUiProvider::FPurposeInfo("General", "Header", NAME_None).GeneratePurposeID()));
+}
+
 void UContentViewsTedsFactory::RegisterWidgetConstructors(ICoreProvider& DataStorage, IUiProvider& DataStorageUi) const
 {
 	// The purpose is unique by name, so this replaces TedsContentBrowser's host, which this factory's order runs after.
 	DataStorageUi.RegisterWidgetFactory<FContentViewsAssetViewConstructor>(DataStorageUi.FindPurpose(ContentViewsAssetViewPurpose()));
+	DataStorageUi.RegisterWidgetFactory<FContentViewsHeaderConstructor>(DataStorageUi.FindPurpose(UE::ContentViews::Teds::HeaderPurpose()),
+		FConditions(TColumn<FAssetNameColumn>()));
+}
+
+TSharedPtr<SWidget> FContentViewsHeaderConstructor::CreateWidget(ICoreProvider* DataStorage, IUiProvider* DataStorageUi,
+	RowHandle TargetRow, RowHandle WidgetRow, const FMetaDataView& Arguments)
+{
+	const TArray<TWeakObjectPtr<const UScriptStruct>>& Matched = GetMatchedColumns();
+	const UScriptStruct* Column = Matched.IsEmpty() ? nullptr : Matched[0].Get();
+	const bool bWide = Column && (Column == FAssetNameColumn::StaticStruct() || Column->HasMetaData(UE::ContentViews::Teds::WideColumnMeta));
+	DataStorage->AddColumn(WidgetRow, FHeaderWidgetSizeColumn{.ColumnSizeMode = EColumnSizeMode::Fill, .Width = bWide ? 3.f : 1.f});
+	return SNew(STextBlock).Text(CreateWidgetDisplayNameText(DataStorage));
 }
 
 void UContentViewsTedsFactory::PostRegister(ICoreProvider& DataStorage)
@@ -126,6 +148,14 @@ TSharedPtr<SWidget> FContentViewsCellConstructor::CreateWidget(ICoreProvider* Da
 	{
 		Text = Binder.BindText(*Computed, &FContentViewStringColumn::Display);
 	}
+	else if (const FName* Colour = MatchedDynamicTemplates.Find(FContentViewColourColumn::StaticStruct()))
+	{
+		const TAttribute<FText> Hex = Binder.BindText(*Colour, &FContentViewColourColumn::Hex);
+		return SNew(SBox).HAlign(HAlign_Left).VAlign(VAlign_Center).WidthOverride(48.f).HeightOverride(14.f)
+		[
+			SNew(SColorBlock).Color(Binder.BindData(*Colour, &FContentViewColourColumn::Colour)).ToolTipText(Hex)
+		];
+	}
 	else if (const FName* Tag = MatchedDynamicTemplates.Find(FItemStringAttributeColumn_Experimental::StaticStruct()))
 	{
 		// A registry tag holds its value; a reference shows the object's name, as in the legacy backend.
@@ -143,9 +173,17 @@ TSharedPtr<SWidget> FContentViewsCellConstructor::CreateWidget(ICoreProvider* Da
 
 namespace UE::ContentViews::Teds
 {
+	const TCHAR* const WideColumnMeta = TEXT("ContentViewsWide");
+
+	IUiProvider::FPurposeID HeaderPurpose()
+	{
+		return IUiProvider::FPurposeInfo("ContentViews", "Header", NAME_None).GeneratePurposeID();
+	}
+
 	void RegisterContentViewCell(IUiProvider& Ui, const UScriptStruct& Template, FName Identifier)
 	{
-		Ui.RegisterWidgetFactory<FContentViewsCellConstructor>(Ui.FindPurpose(Ui.GetGeneralWidgetPurposeID()),
-			FConditions(TColumn<void>(TWeakObjectPtr<const UScriptStruct>(&Template), Identifier)));
+		const FConditions Column(TColumn<void>(TWeakObjectPtr<const UScriptStruct>(&Template), Identifier));
+		Ui.RegisterWidgetFactory<FContentViewsCellConstructor>(Ui.FindPurpose(Ui.GetGeneralWidgetPurposeID()), Column);
+		Ui.RegisterWidgetFactory<FContentViewsHeaderConstructor>(Ui.FindPurpose(HeaderPurpose()), Column);
 	}
 }

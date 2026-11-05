@@ -34,13 +34,15 @@ namespace UE::ContentViews::Teds
 		Text,
 		/** FItemStringAttributeColumn_Experimental under the tag's name: a registry tag read as it is. */
 		Tag,
-		/** FSlateColorColumn, drawn as the stock colour chip. */
+		/** FContentViewColourColumn under the column's name, drawn as a colour chip. */
 		Colour,
 	};
 
 	struct FColumnSlot
 	{
 		FName Name;
+		/** The header: the view's label for the column, else its name in words. */
+		FString Label;
 		TSharedPtr<const IContentViewColumn> Reader;
 		EColumnKind Kind = EColumnKind::Tag;
 		bool bComputed = false;

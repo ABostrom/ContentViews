@@ -2,17 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
+#include "ContentViewAssetActions.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 
 class SBox;
 class UContentViewDefinition;
-
-namespace UE::ContentViews
-{
-	/** The tab's right-click menu for a selection: the Content Browser's asset menu, with Edit, Browse and Copy Reference. */
-	TSharedPtr<SWidget> MakeAssetContextMenu(const TArray<FAssetData>& Assets);
-}
 
 /**
  * The Content Views tab: every view asset on the left, the chosen view on the right as the stock Content Browser asset

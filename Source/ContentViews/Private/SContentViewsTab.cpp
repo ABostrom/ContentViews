@@ -97,6 +97,19 @@ namespace
 
 namespace UE::ContentViews
 {
+	void OpenAssets(TConstArrayView<FAssetData> Assets)
+	{
+		TArray<FSoftObjectPath> Paths;
+		for (const FAssetData& Asset : Assets)
+		{
+			Paths.Add(Asset.GetSoftObjectPath());
+		}
+		if (!Paths.IsEmpty())
+		{
+			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorsForAssets(Paths);
+		}
+	}
+
 	TSharedPtr<SWidget> MakeAssetContextMenu(const TArray<FAssetData>& Assets)
 	{
 		if (Assets.IsEmpty())
@@ -136,15 +149,7 @@ namespace UE::ContentViews
 				Builder.BeginSection("ContentViewsAsset", LOCTEXT("AssetSection", "Asset"));
 				Builder.AddMenuEntry(LOCTEXT("Edit", "Edit..."), FText::GetEmpty(),
 					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Edit"),
-					FUIAction(FExecuteAction::CreateLambda([Assets]()
-					{
-						TArray<FSoftObjectPath> Paths;
-						for (const FAssetData& Asset : Assets)
-						{
-							Paths.Add(Asset.GetSoftObjectPath());
-						}
-						GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorsForAssets(Paths);
-					})));
+					FUIAction(FExecuteAction::CreateLambda([Assets]() { OpenAssets(Assets); })));
 				Builder.AddMenuEntry(LOCTEXT("Browse", "Browse to Asset"), FText::GetEmpty(),
 					FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.BrowseContent"),
 					FUIAction(FExecuteAction::CreateLambda([Assets]()
@@ -240,7 +245,7 @@ namespace
 			}
 			const TSharedRef<const IContentViewColumn> Reader = UE::ContentViews::GetColumn(Column);
 			const bool bNumber = Info.Type == EContentViewValueType::Number;
-			Config.CustomColumns.Emplace(Column, FText::FromString(FName::NameToDisplayString(Info.Name, false)),
+			Config.CustomColumns.Emplace(Column, FText::FromString(View.GetColumnLabel(Column)),
 				FText::FromString(Info.Tooltip),
 				bNumber ? UObject::FAssetRegistryTag::TT_Numerical : UObject::FAssetRegistryTag::TT_Alphabetical,
 				FOnGetCustomAssetColumnData::CreateLambda([Reader](FAssetData& Asset, FName)
@@ -270,7 +275,7 @@ namespace
 		Config.ThumbnailLabel = EThumbnailLabel::AssetName;
 		Config.OnAssetDoubleClicked = FOnAssetDoubleClicked::CreateLambda([](const FAssetData& Asset)
 		{
-			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorsForAssets(TArray<FSoftObjectPath>{Asset.GetSoftObjectPath()});
+			UE::ContentViews::OpenAssets({Asset});
 		});
 		Config.OnGetAssetContextMenu = FOnGetAssetContextMenu::CreateStatic(&UE::ContentViews::MakeAssetContextMenu);
 

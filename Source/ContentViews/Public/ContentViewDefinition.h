@@ -97,17 +97,17 @@ struct CONTENTVIEWS_API FContentViewSpec
 };
 
 /**
- * A way to browse content: which assets are its rows, which columns it shows, its sort, its filters, and list or tiles.
- * Columns read registry tags or registered computed columns, so a view never loads its rows. Make one in the editor and
- * it appears in Window > Content Views and as a filter in every Content Browser.
+ * What every view asset has, whichever archetype it is: a name, an icon, and the editor-only primary asset type ContentView.
+ * UContentViewDefinition is the asset archetype (rows are assets); other archetypes (Scene Cost, rows joined with the open
+ * level) derive from this too.
  */
-UCLASS(BlueprintType, meta = (ShortTooltip = "A way to browse content: rows, columns, sort and filters."))
-class CONTENTVIEWS_API UContentViewDefinition : public UPrimaryDataAsset
+UCLASS(Abstract, BlueprintType)
+class CONTENTVIEWS_API UContentViewBase : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
 
 public:
-	/** What the view is called in the Content Views tab and the filter menu. */
+	/** What the view is called in the Content Views tab, the filter menu and the source bar. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, AssetRegistrySearchable, Category = "View")
 	FText DisplayName;
 
@@ -115,6 +115,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, AssetRegistrySearchable, Category = "View")
 	FName Icon;
 
+	/** The type half of every view's id. */
+	static FPrimaryAssetType StaticAssetType();
+
+	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
+
+	/** The name shown for the view: DisplayName, else the asset's name. */
+	FText GetViewName() const;
+};
+
+/**
+ * A way to browse content: which assets are its rows, which columns it shows, its sort, its filters, and list or tiles.
+ * Columns read registry tags or registered computed columns, so a view never loads its rows. Make one in the editor and
+ * it appears in Tools > Content Views and as a filter in every Content Browser.
+ */
+UCLASS(BlueprintType, meta = (ShortTooltip = "A way to browse content: rows, columns, sort and filters."))
+class CONTENTVIEWS_API UContentViewDefinition : public UContentViewBase
+{
+	GENERATED_BODY()
+
+public:
 	/** The class whose assets are the rows. Blueprints count by their parent class. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Rows", meta = (AllowAbstract = "true"))
 	TSoftClassPtr<UObject> RowClass;
@@ -130,6 +150,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
 	TArray<FName> Columns;
 
+	/** A header for a column whose name does not read well as one (NaniteEnabled as Nanite). Others read their name. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
+	TMap<FName, FText> ColumnLabels;
+
 	/** The order rows open in. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Columns")
 	FContentViewSort DefaultSort;
@@ -141,13 +165,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "View")
 	EContentViewMode Mode = EContentViewMode::List;
 
-	/** The type half of every view's id. */
-	static FPrimaryAssetType StaticAssetType();
-
-	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
-
-	/** The name shown for the view: DisplayName, else the asset's name. */
-	FText GetViewName() const;
+	/** A column's header: its label, else its name in words (TeamColour as Team Colour). */
+	FString GetColumnLabel(FName Column) const;
 
 	FContentViewSpec ToSpec() const;
 

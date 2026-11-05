@@ -8,17 +8,28 @@
 #include "ContentViewQuery.h"
 #include "ContentViewsSettings.h"
 #include "ContentViewsTeds.h"
+#include "ContentViewsTedsBackend.h"
+#include "Columns/SlateDelegateColumns.h"
 #include "DataStorage/Features.h"
+#include "Editor.h"
+#include "Elements/Interfaces/TypedElementDataStorageInterface.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/AutomationTest.h"
+#include "SContentViewsSource.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Tests/AutomationCommon.h"
+#include "TedsAssetDataColumns.h"
+#include "TedsQueryStackExecutor.h"
 #include "UObject/Package.h"
+#include "ITedsTableViewer.h"
 
 namespace
 {
 	const FName TedsTestCrewCheck(TEXT("CrewCheck"));
 	const FName TedsTestSpeedTwice(TEXT("SpeedTwice"));
+	const FName TedsTestCrewColour(TEXT("CrewColour"));
 
 	/**
 	 * Four rows of the test class in a fresh /Temp folder (three assets, one a Blueprint child), and a view over them with
@@ -48,6 +59,11 @@ namespace
 				const FContentViewValue Crew = ReadTag(Asset, TEXT("Crew"));
 				return Crew.bIsSet ? Crew : FContentViewValue::OfProblem(TEXT("no crew"));
 			}));
+			RegisterColumn(TedsTestCrewColour, MakeColumn(EContentViewValueType::String, [](const FAssetData& Asset)
+			{
+				const FContentViewValue Crew = ReadTag(Asset, TEXT("Crew"));
+				return Crew.bIsSet ? FContentViewValue::OfString(Crew.String == TEXT("Red") ? TEXT("#FF0000") : TEXT("#0000FF")) : FContentViewValue();
+			}, FText::GetEmpty(), EContentViewColumnShows::Colour));
 
 			Folder = FString::Printf(TEXT("/Temp/ContentViewsTedsTest_%s"), *FGuid::NewGuid().ToString(EGuidFormats::Digits));
 			MakeRow(TEXT("Row_Fast"), 90.f, TEXT("Red"));
@@ -74,6 +90,7 @@ namespace
 			}
 			UE::ContentViews::UnregisterColumn(TedsTestSpeedTwice);
 			UE::ContentViews::UnregisterColumn(TedsTestCrewCheck);
+			UE::ContentViews::UnregisterColumn(TedsTestCrewColour);
 			SetBackend(WasBackend);
 		}
 
@@ -91,7 +108,7 @@ namespace
 			UContentViewDefinition* NewView = NewObject<UContentViewDefinition>(Package, Name, RF_Public | RF_Standalone);
 			NewView->DisplayName = FText::FromString(Name);
 			NewView->RowClass = UContentViewsTestRow::StaticClass();
-			NewView->Columns = {TEXT("Name"), TEXT("Speed"), TEXT("Crew"), TEXT("bKeeper"), TedsTestSpeedTwice, TedsTestCrewCheck};
+			NewView->Columns = {TEXT("Name"), TEXT("Speed"), TEXT("Crew"), TEXT("bKeeper"), TedsTestSpeedTwice, TedsTestCrewCheck, TedsTestCrewColour};
 			Register(NewView);
 			return NewView;
 		}
@@ -329,6 +346,160 @@ bool FContentViewsTedsLiveTest::RunTest(const FString& Parameters)
 			}
 		}
 		AddError(TEXT("the new row is not in the view"));
+	});
+	return true;
+}
+
+namespace
+{
+	/** The fixture's rows in the order a source's stack shows them, once it has run (by asset name). */
+	TArray<FString> TedsTestShownOrder(const FTedsTestRows& Rows, const SContentViewsSource& Source)
+	{
+		using namespace UE::Editor::DataStorage;
+		const TSharedPtr<QueryStack::IRowNode> Shown = Source.GetShownRows();
+		QueryStack::FExplicitUpdateExecutor Executor(TEXT("ContentViewsTest"), Shown);
+		TArray<FString> Paths;
+		for (int32 Pass = 0; Pass < 200; ++Pass)
+		{
+			Executor.Update();
+		}
+		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
+		for (const RowHandle Row : Shown->GetRows())
+		{
+			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
+			{
+				Paths.Add(Asset->AssetData.GetSoftObjectPath().ToString());
+			}
+		}
+		return Rows.Mine(Paths);
+	}
+
+	/** The row of Path in the backend's view of View. */
+	UE::Editor::DataStorage::RowHandle TedsTestRowOf(const UContentViewDefinition& View, const FString& Path)
+	{
+		using namespace UE::Editor::DataStorage;
+		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
+		const UE::ContentViews::Teds::FViewState* State = UE::ContentViews::Teds::FBackend::Get().FindView(FSoftObjectPath(&View));
+		for (const RowHandle Row : State ? UE::ContentViews::Teds::FBackend::Get().RowsOf(*State) : TArray<RowHandle>())
+		{
+			const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row);
+			if (Asset && Asset->AssetData.GetSoftObjectPath().ToString() == Path)
+			{
+				return Row;
+			}
+		}
+		return InvalidRowHandle;
+	}
+}
+
+/**
+ * Situation: a row of a view's Content Source double-clicked, then right-clicked, through the columns the TEDS table binds
+ * its list's double-click and context menu to.
+ * Why it matters: a table you cannot open an asset from, or act on with the Content Browser's menu, is a dead end; the
+ * legacy tab's right-click once crashed for a missing menu context, so the TEDS one builds the same menu.
+ * Pass: the double-click opens the row's asset editor; the right-click builds a menu for the selected row with no error.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsRowActionsTest,
+	"ContentViews.Teds.ARowOpensOnDoubleClickAndGivesTheAssetMenuOnRightClick",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsRowActionsTest::RunTest(const FString& Parameters)
+{
+	// An opened editor asks revision control about its package, and a git provider cannot find an unsaved /Temp one.
+	AddExpectedErrorPlain(TEXT("Invalid path '/Temp'"), EAutomationExpectedErrorFlags::Contains, -1);
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	TedsTestWhenRows(*this, Rows, [Rows]() { return Rows->View; }, 4, [this, Rows]()
+	{
+		using namespace UE::Editor::DataStorage;
+		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
+		const TSharedRef<SContentViewsSource> Source = SNew(SContentViewsSource, FSoftObjectPath(Rows->View));
+		const FString FastPath = Rows->Folder / TEXT("Row_Fast.Row_Fast");
+		const RowHandle Fast = TedsTestRowOf(*Rows->View, FastPath);
+		if (!TestTrue(TEXT("the fast row is in the view"), Fast != InvalidRowHandle) || !TestTrue(TEXT("a viewer"), Source->GetViewer().IsValid()))
+		{
+			return;
+		}
+		const RowHandle WidgetRow = Source->GetViewer()->GetWidgetRowHandle();
+
+		UObject* Asset = FSoftObjectPath(FastPath).ResolveObject();
+		UAssetEditorSubsystem* Editors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+		const FWidgetDoubleClickedColumn* DoubleClick = Storage->GetColumn<FWidgetDoubleClickedColumn>(WidgetRow);
+		if (TestTrue(TEXT("the table's double-click is bound"), DoubleClick && DoubleClick->OnMouseButtonDoubleClick && DoubleClick->OnMouseButtonDoubleClick->IsBound()))
+		{
+			DoubleClick->OnMouseButtonDoubleClick->Execute(FTedsRowHandle{.RowHandle = Fast});
+			TestNotNull(TEXT("the double-click opened the row's asset"), Editors->FindEditorForAsset(Asset, /*bFocusIfOpen*/ false));
+			Editors->CloseAllEditorsForAsset(Asset);
+		}
+
+		Source->GetViewer()->SetSelection(Fast, true, ESelectInfo::Direct);
+		TestEqual(TEXT("the selection is the fast row's asset"), Source->GetSelectedAssets().Num(), 1);
+		const FWidgetContextMenuColumn* Menu = Storage->GetColumn<FWidgetContextMenuColumn>(WidgetRow);
+		if (TestTrue(TEXT("the table's context menu is bound"), Menu && Menu->OnContextMenuOpening && Menu->OnContextMenuOpening->IsBound()))
+		{
+			TestTrue(TEXT("the right-click builds the asset menu"), Menu->OnContextMenuOpening->Execute().IsValid());
+		}
+	});
+	// The revision control answer arrives a few frames later; it belongs to this test.
+	AddCommand(new FWaitLatentCommand(1.f));
+	return true;
+}
+
+/**
+ * Situation: the fixture's view in Tiles mode, sorted by Speed, highest first.
+ * Why it matters: a tile view has no header to click, so the view's own sort is the only order its tiles can have.
+ * Pass: the tiles run 100, 90, 65, 40.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsTileSortTest,
+	"ContentViews.Teds.TilesOpenInTheViewsDefaultSort",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsTileSortTest::RunTest(const FString& Parameters)
+{
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	UContentViewDefinition* Tiles = Rows->MakeView(TEXT("CV_ContentViewsTedsTestTiles"));
+	Tiles->Mode = EContentViewMode::Tiles;
+	Tiles->DefaultSort.Column = TEXT("Speed");
+	Tiles->DefaultSort.bDescending = true;
+	FPropertyChangedEvent Changed(nullptr);
+	FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Tiles, Changed);
+	TedsTestWhenRows(*this, Rows, [Tiles]() { return Tiles; }, 4, [this, Rows, Tiles]()
+	{
+		const TSharedRef<SContentViewsSource> Source = SNew(SContentViewsSource, FSoftObjectPath(Tiles));
+		TestEqual(TEXT("tiles by speed, highest first"), FString::Join(TedsTestShownOrder(*Rows, *Source), TEXT(",")),
+			FString(TEXT("Row_Hundred,Row_Fast,BP_Row_Child,Row_Slow")));
+	});
+	return true;
+}
+
+/**
+ * Situation: the fixture's colour column, CrewColour, in the TEDS backend.
+ * Why it matters: the stock colour column's header reads "Color" in every view and a row holds one; a view's column is
+ * named for what it shows.
+ * Pass: the column's type is named Crew Colour, and its values are the legacy backend's (red for the red crew).
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsColourTest,
+	"ContentViews.Teds.AColourColumnIsNamedForItself",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsColourTest::RunTest(const FString& Parameters)
+{
+	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
+	TedsTestWhenRows(*this, Rows, [Rows]() { return Rows->View; }, 4, [this, Rows]()
+	{
+		const UE::ContentViews::Teds::FViewState* State = UE::ContentViews::Teds::FBackend::Get().FindView(FSoftObjectPath(Rows->View));
+		const UE::ContentViews::Teds::FColumnSlot* Slot = State ? State->FindColumn(TedsTestCrewColour) : nullptr;
+		if (!TestNotNull(TEXT("the colour column"), Slot))
+		{
+			return;
+		}
+		TestEqual(TEXT("its header"), Slot->Type->GetMetaData(TEXT("DisplayName")), FString(TEXT("Crew Colour")));
+		for (const FContentViewRow& Row : UE::ContentViews::Teds::ReadRows(*Rows->View))
+		{
+			if (Row.AssetPath.EndsWith(TEXT("Row_Fast.Row_Fast")))
+			{
+				TestEqual(TEXT("the red crew's chip"), Row.Values.FindChecked(TedsTestCrewColour.ToString()).String, FString(TEXT("#FF0000")));
+			}
+		}
 	});
 	return true;
 }
