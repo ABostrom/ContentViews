@@ -398,6 +398,8 @@ from the engine's basic shapes only (no World Partition, no PCG):
 - `ISM_Cones`, an actor whose instanced static mesh component draws 300 cones;
 - `HISM_Spheres`, an actor whose hierarchical instanced static mesh component draws 4,000 spheres;
 - a movable sun, a sky atmosphere and a sky light that captures it in real time, so it renders with no lighting build.
+- the engine's default World Settings (`AWorldSettings`). A project with its own `WorldSettingsClassName` swaps its class in
+  when the level loads, so resave the level only from a project that uses the default, or it carries that project's class.
 
 The 4,000 spheres and the single one put 3,840,960 triangles in the scene, and the sphere is not Nanite, so its row
 passes the example view's budget of 1,000,000 and carries the alert. The engine's basic shapes carry no compressed-size
