@@ -1,3 +1,4 @@
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
@@ -28,6 +29,35 @@ namespace
 	/** The open tab's widget, for opening a view in it. */
 	TWeakPtr<SContentViewsTab> GContentViewsTab;
 
+	/** The assets whose packages reference Asset's, from the registry's dependency graph: one row's lookup, nothing loaded. */
+	FContentViewValue ContentViewsUsedBy(const FAssetData& Asset)
+	{
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
+		TArray<FName> Referencers;
+		Registry.GetReferencers(Asset.PackageName, Referencers, UE::AssetRegistry::EDependencyCategory::Package);
+		TArray<FAssetData> Users;
+		for (const FName Package : Referencers)
+		{
+			if (Package != Asset.PackageName)
+			{
+				Registry.GetAssetsByPackageName(Package, Users, /*bIncludeOnlyOnDiskAssets*/ false, /*bSkipARFilteredAssets*/ true);
+			}
+		}
+		if (Users.IsEmpty())
+		{
+			return FContentViewValue();
+		}
+		Users.Sort([](const FAssetData& A, const FAssetData& B) { return A.AssetName.LexicalLess(B.AssetName); });
+		TArray<FString> Paths;
+		TArray<FString> Names;
+		for (const FAssetData& User : Users)
+		{
+			Paths.Add(User.GetSoftObjectPath().ToString());
+			Names.Add(User.AssetName.ToString());
+		}
+		return FContentViewValue::OfString(UE::ContentViews::JoinList(Paths), FString::Join(Names, TEXT(", ")));
+	}
+
 	void ContentViewsRegisterBuiltInColumns()
 	{
 		using namespace UE::ContentViews;
@@ -54,6 +84,8 @@ namespace
 		{
 			return FContentViewValue::OfString(Asset.AssetClassPath.ToString(), Asset.AssetClassPath.GetAssetName().ToString());
 		}, LOCTEXT("ClassTooltip", "The asset's class.")));
+		RegisterColumn(TEXT("UsedBy"), MakeColumn(EContentViewValueType::String, &ContentViewsUsedBy,
+			LOCTEXT("UsedByTooltip", "The assets that reference this one, hard or soft.")));
 	}
 }
 

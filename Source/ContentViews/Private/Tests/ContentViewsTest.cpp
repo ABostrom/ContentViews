@@ -3,6 +3,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "ContentViewColumns.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
 #include "ContentViewWidgets.h"
@@ -420,6 +421,43 @@ bool FContentViewsOtherArchetypeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("with a widget registered for its class the tab shows it"),
 		UE::ContentViews::MakeViewWidget(*Other)->GetType(), FName(TEXT("SSpacer")));
 	UE::ContentViews::UnregisterViewWidget(*UContentViewsTestOtherView::StaticClass());
+	return true;
+}
+
+
+/**
+ * Situation: the Used By column on an engine mesh the plugin's example level places, and on a view asset nothing references.
+ * Why it matters: Used By is how a view says where an asset is needed before someone deletes or changes it; a missing
+ * user, or a user invented for an asset nothing names, sends them the wrong way.
+ * Pass: the cube lists the example level by path and name; the Scene Cost view lists nobody.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsUsedByTest,
+	"ContentViews.UsedByListsTheAssetsThatReferenceARow",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsUsedByTest::RunTest(const FString& Parameters)
+{
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
+	Registry.WaitForCompletion();
+	const TSharedRef<const IContentViewColumn> UsedBy = UE::ContentViews::GetColumn(TEXT("UsedBy"));
+	TestTrue(TEXT("Used By is a built-in column"), UE::ContentViews::IsColumnRegistered(TEXT("UsedBy")));
+
+	const FAssetData Cube = Registry.GetAssetByObjectPath(FSoftObjectPath(TEXT("/Engine/BasicShapes/Cube.Cube")));
+	if (!TestTrue(TEXT("the engine cube"), Cube.IsValid()))
+	{
+		return false;
+	}
+	const FContentViewValue CubeUsers = UsedBy->GetValue(Cube);
+	TestTrue(TEXT("the cube is used by the example level"),
+		UE::ContentViews::SplitList(CubeUsers.String).Contains(TEXT("/ContentViews/Examples/L_SceneCostExample.L_SceneCostExample")));
+	TestTrue(TEXT("and shows its name"), CubeUsers.GetDisplay().Contains(TEXT("L_SceneCostExample")));
+
+	const FAssetData View = Registry.GetAssetByObjectPath(FSoftObjectPath(TEXT("/ContentViews/Examples/CV_SceneCost.CV_SceneCost")));
+	if (!TestTrue(TEXT("the Scene Cost view"), View.IsValid()))
+	{
+		return false;
+	}
+	TestFalse(TEXT("nothing uses a view"), UsedBy->GetValue(View).bIsSet);
 	return true;
 }
 

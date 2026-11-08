@@ -70,8 +70,9 @@ A column is an `IContentViewColumn` (`Public/ContentViewColumns.h`): a function 
 **The default provider** is the registry tag of the column's name. `UE::ContentViews::ReadTag` turns the tag's text
 into a value: localised text gives its words, text that parses as a number becomes a number, `True` and `False` become a
 bool, and everything else is a string. An object path, or a comma list of them, keeps the full path as its value (so an
-agent can act on it) and shows the object names. Four columns are built in: `Name`, `Path`, `Plugin` (the content root)
-and `Class`.
+agent can act on it) and shows the object names. Five columns are built in: `Name`, `Path`, `Plugin` (the content root),
+`Class` and `UsedBy`: the assets whose packages reference the row's, hard or soft, read from the registry's dependency
+graph for that one row each time it is drawn or recounted, so nothing loads and no pass runs over every row.
 
 So the cheapest column is a field marked `AssetRegistrySearchable`. A value that has to be worked out goes in the
 class's `GetAssetRegistryTags`, which runs when the asset is saved:

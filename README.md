@@ -128,14 +128,14 @@ An agent reads the same numbers with `ContentViewsTeds.SceneCostTools.RunSceneCo
 
 Your view also appears in every Content Browser's filter menu under *Advanced > All Filters > Content Views*.
 
-Columns named `Name`, `Path`, `Plugin` and `Class` always work. Columns that need code (an average, a reverse lookup)
+Columns named `Name`, `Path`, `Plugin`, `Class` and `UsedBy` (the assets that reference the row, from the asset registry) always work. Columns that need code (an average, a reverse lookup)
 are small providers registered by name; see [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Tests
 
 `ContentViews.*` automation tests run in an editor: a view over a class and its Blueprint children with typed values,
 every filter operator, validation, the `RunView` tool called through the toolset registry the way MCP calls it, and a new
-view and an unsaved new row reaching an open tab. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
+view and an unsaved new row reaching an open tab, and Used By naming the level that places an engine mesh. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
 the same rows and values, a number column sorted by TEDS's own sorter, a value filter as the filter bar runs it, a
 provider's alert, the backend switch, a new view and row appearing while the editor runs, double-click and the right-click menu, tiles in the default sort, a colour column named for itself, Heavy Meshes' threshold and a live edit of it, and Scene Cost counting placed, deleted and instanced meshes (including instances added with no `Modify`, as PCG adds them) and its budget alert, Scene Cost in the tab and through its tools, the example level's counts and alert, and views already on disk getting their sources at startup (not only views made while the editor runs). `ContentViews.EveryListFindsAViewOfAnotherArchetype` checks the tab, the filter menu and `ListViews` against a view that is not of assets. TEDS is off in
 commandlets, so run them in an editor (`-ExecCmds="Automation RunTests ContentViews"`), not with `-run=`.
