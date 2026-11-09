@@ -63,7 +63,9 @@ namespace
 		ContentViewRegistry().GetAssets(UE::ContentViews::MakeRowFilter(*RowClass, View.bIncludeSubclasses), Found);
 		Found.RemoveAll([RowClass, &View](const FAssetData& Asset)
 		{
-			return !UE::ContentViews::IsRowOf(Asset, *RowClass, View.bIncludeSubclasses);
+			// An external actor is a part of its level, not an asset of its own: an Actor view must not list them.
+			return !Asset.GetOptionalOuterPathName().IsNone()
+				|| !UE::ContentViews::IsRowOf(Asset, *RowClass, View.bIncludeSubclasses);
 		});
 		return Found;
 	}
