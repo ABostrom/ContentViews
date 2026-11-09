@@ -9,6 +9,9 @@
 #include "ContentViewWidgets.h"
 #include "ContentViewsFilterExtension.h"
 #include "ContentViewsTools.h"
+#include "ContentViewsSettings.h"
+#include "ContentViewsUserSettings.h"
+#include "Misc/ScopeExit.h"
 #include "FrontendFilterBase.h"
 #include "Widgets/Layout/SSpacer.h"
 #include "Dom/JsonObject.h"
@@ -458,6 +461,72 @@ bool FContentViewsUsedByTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	TestFalse(TEXT("nothing uses a view"), UsedBy->GetValue(View).bIsSet);
+	return true;
+}
+
+/**
+ * Situation: the fixture's view, hidden by this user, then unhidden.
+ * Why it matters: a long view list gets noisy (ContentViews#3); a user hides the views he does not use, for himself only,
+ * and a hidden view must leave every list or it is still noise.
+ * Pass: the choice is a per-user setting; hidden, the view leaves FindViews, the tab, the Content Browser's filters and
+ * ListViews, while Show Hidden, ListViews with bIncludeHidden and FindViewAsset by name still reach it; unhidden, it
+ * returns to every list, as for a user who never hid anything.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsHideTest,
+	"ContentViews.AHiddenViewLeavesEveryListUntilUnhidden",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsHideTest::RunTest(const FString& Parameters)
+{
+	FContentViewsTestRows Rows;
+	const FSoftObjectPath Path(Rows.View);
+	UContentViewsUserSettings* Settings = GetMutableDefault<UContentViewsUserSettings>();
+	const TArray<FSoftObjectPath> Before = Settings->HiddenViews;
+	ON_SCOPE_EXIT
+	{
+		Settings->HiddenViews = Before;
+		Settings->SaveConfig();
+	};
+	TestEqual(TEXT("the choice is this user's, never shared"), UContentViewsUserSettings::StaticClass()->ClassConfigName,
+		FName(TEXT("EditorPerProjectUserSettings")));
+
+	const TSharedRef<SContentViewsTab> Tab = SNew(SContentViewsTab);
+	const auto Found = [&Path]() { return UE::ContentViews::FindViews().ContainsByPredicate([&Path](const FAssetData& Asset) { return Asset.GetSoftObjectPath() == Path; }); };
+	const auto Filtered = [&Rows]()
+	{
+		TArray<TSharedRef<FFrontendFilter>> Filters;
+		GetDefault<UContentViewsFilterExtension>()->AddFrontEndFilterExtensions(nullptr, Filters);
+		const FString Name = TEXT("ContentView_") + Rows.View->GetName();
+		return Filters.ContainsByPredicate([&Name](const TSharedRef<FFrontendFilter>& Filter) { return Filter->GetName() == Name; });
+	};
+	const auto Listed = [&Path](bool bIncludeHidden)
+	{
+		return UContentViewsTools::ListViews(bIncludeHidden).ContainsByPredicate([&Path](const FContentViewSummary& Each) { return Each.AssetPath == Path.ToString(); });
+	};
+	TestTrue(TEXT("shown at first"), Found() && Tab->GetListedViews().Contains(Path) && Listed(false));
+
+	UContentViewsUserSettings::SetHidden(Path, true);
+	TestFalse(TEXT("hidden, FindViews leaves it out"), Found());
+	TestFalse(TEXT("hidden, the open tab leaves it out"), Tab->GetListedViews().Contains(Path));
+	TestFalse(TEXT("hidden, ListViews leaves it out"), Listed(false));
+	TestTrue(TEXT("hidden, ListViews with bIncludeHidden lists it"), Listed(true));
+	TestTrue(TEXT("hidden, it still runs by name"), UE::ContentViews::FindViewAsset(Rows.View->GetName()) == Rows.View);
+	if (UContentViewsSettings::IsLegacyActive())
+	{
+		TestFalse(TEXT("hidden, the Content Browser has no filter for it"), Filtered());
+	}
+	Tab->SetShowHidden(true);
+	TestTrue(TEXT("Show Hidden lists it again"), Tab->GetListedViews().Contains(Path));
+	Tab->SetShowHidden(false);
+
+	UContentViewsUserSettings::SetHidden(Path, false);
+	TestTrue(TEXT("unhidden, FindViews finds it"), Found());
+	TestTrue(TEXT("unhidden, the open tab lists it"), Tab->GetListedViews().Contains(Path));
+	TestTrue(TEXT("unhidden, ListViews lists it"), Listed(false));
+	if (UContentViewsSettings::IsLegacyActive())
+	{
+		TestTrue(TEXT("unhidden, the Content Browser has its filter"), Filtered());
+	}
 	return true;
 }
 

@@ -6,6 +6,7 @@
 #include "ContentBrowserModule.h"
 #include "ContentViewQuery.h"
 #include "ContentViewsSettings.h"
+#include "ContentViewsUserSettings.h"
 #include "ContentViewsTedsColumns.h"
 #include "ContentViewsTedsFactory.h"
 #include "Elements/Framework/TypedElementQueryContext.h"
@@ -136,6 +137,7 @@ namespace UE::ContentViews::Teds
 		{
 			ApplySetting();
 		});
+		UContentViewsUserSettings::OnHiddenViewsChanged().AddRaw(this, &FBackend::ApplyHidden);
 		ApplySetting();
 	}
 
@@ -152,6 +154,7 @@ namespace UE::ContentViews::Teds
 			Module->Get().OnFilesLoaded().RemoveAll(this);
 		}
 		FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
+		UContentViewsUserSettings::OnHiddenViewsChanged().RemoveAll(this);
 		if (UObjectInitialized())
 		{
 			GetMutableDefault<UContentViewsSettings>()->OnSettingChanged().RemoveAll(this);
@@ -328,6 +331,33 @@ namespace UE::ContentViews::Teds
 				bShowedSourceBar = true;
 			}
 		}
+		RefreshViews();
+	}
+
+	void FBackend::ApplyHidden()
+	{
+		if (!Storage || !IsActive())
+		{
+			return;
+		}
+		TArray<FSoftObjectPath> Paths;
+		Views.GetKeys(Paths);
+		for (const FSoftObjectPath& Path : Paths)
+		{
+			if (UContentViewsUserSettings::IsHidden(Path))
+			{
+				DropView(Path);
+			}
+		}
+		SceneViews.GetKeys(Paths);
+		for (const FSoftObjectPath& Path : Paths)
+		{
+			if (UContentViewsUserSettings::IsHidden(Path))
+			{
+				DropSceneView(Path);
+			}
+		}
+		// The views unhidden come back as any view not yet built does.
 		RefreshViews();
 	}
 
@@ -666,7 +696,7 @@ namespace UE::ContentViews::Teds
 	void FBackend::HandleAssetAdded(const FAssetData& Asset)
 	{
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(AssetRegistryConstants::ModuleName).Get();
-		if (!IsActive() || Registry.IsLoadingAssets())
+		if (!IsActive() || Registry.IsLoadingAssets() || UContentViewsUserSettings::IsHidden(Asset.GetSoftObjectPath()))
 		{
 			return;
 		}

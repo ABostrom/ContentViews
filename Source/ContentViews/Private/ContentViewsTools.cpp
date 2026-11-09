@@ -4,10 +4,10 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ContentViewsTools)
 
-TArray<FContentViewSummary> UContentViewsTools::ListViews()
+TArray<FContentViewSummary> UContentViewsTools::ListViews(bool bIncludeHidden)
 {
 	TArray<FContentViewSummary> Views;
-	for (const FAssetData& Asset : UE::ContentViews::FindViews())
+	for (const FAssetData& Asset : UE::ContentViews::FindViews(bIncludeHidden))
 	{
 		if (const UContentViewBase* View = Cast<UContentViewBase>(Asset.GetAsset()))
 		{
@@ -92,7 +92,7 @@ UContentViewDefinition* UContentViewsTools::FindViewOrRaise(const FString& View)
 		return nullptr;
 	}
 	TArray<FString> Names;
-	for (const FAssetData& Asset : UE::ContentViews::FindViews())
+	for (const FAssetData& Asset : UE::ContentViews::FindViews(/*bIncludeHidden*/ true))
 	{
 		Names.Add(Asset.AssetName.ToString());
 	}

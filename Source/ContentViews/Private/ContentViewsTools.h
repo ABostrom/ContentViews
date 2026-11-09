@@ -71,10 +71,11 @@ class UContentViewsTools : public UToolsetDefinition
 public:
 	/**
 	 * Returns every view, of every archetype.
+	 * @param bIncludeHidden Also list the views this user hid from the lists (Editor Preferences > Content Views).
 	 * @return Each view's name, asset path, archetype, and for a view of assets its row class and columns.
 	 */
 	UFUNCTION(meta = (AICallable), Category = "ContentViews")
-	static TArray<FContentViewSummary> ListViews();
+	static TArray<FContentViewSummary> ListViews(bool bIncludeHidden = false);
 
 	/**
 	 * Returns a view's columns with their types, its own filters, its default sort and its row count.

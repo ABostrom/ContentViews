@@ -12,6 +12,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "ToolsetRegistry/ToolsetRegistrySubsystem.h"
 #include "ContentViewsSettings.h"
+#include "ContentViewsUserSettings.h"
+#include "Misc/ScopeExit.h"
 #include "ContentViewsTeds.h"
 #include "ContentViewsTedsBackend.h"
 #include "Columns/SlateDelegateColumns.h"
@@ -323,6 +325,34 @@ bool FContentViewsTedsSwitchTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("no source under Legacy"), UE::ContentViews::Teds::HasContentSource(*Rows.View));
 	FTedsTestRows::SetBackend(EContentViewsBackend::Teds);
 	TestTrue(TEXT("a source again under TEDS"), UE::ContentViews::Teds::HasContentSource(*Rows.View));
+	return true;
+}
+
+/**
+ * Situation: the fixture's view under the TEDS backend, hidden by this user, then unhidden.
+ * Why it matters: a hidden view leaves every list (ContentViews#3), the Content Browser's Content Sources included.
+ * Pass: hidden, the view has no Content Source; unhidden, it has one again.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsHideTest,
+	"ContentViews.Teds.AHiddenViewHasNoContentSourceUntilUnhidden",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FContentViewsTedsHideTest::RunTest(const FString& Parameters)
+{
+	FTedsTestRows Rows;
+	const FSoftObjectPath Path(Rows.View);
+	UContentViewsUserSettings* Settings = GetMutableDefault<UContentViewsUserSettings>();
+	const TArray<FSoftObjectPath> Before = Settings->HiddenViews;
+	ON_SCOPE_EXIT
+	{
+		Settings->HiddenViews = Before;
+		Settings->SaveConfig();
+	};
+	TestTrue(TEXT("a source at first"), UE::ContentViews::Teds::HasContentSource(*Rows.View));
+	UContentViewsUserSettings::SetHidden(Path, true);
+	TestFalse(TEXT("hidden, no source"), UE::ContentViews::Teds::HasContentSource(*Rows.View));
+	UContentViewsUserSettings::SetHidden(Path, false);
+	TestTrue(TEXT("unhidden, a source again"), UE::ContentViews::Teds::HasContentSource(*Rows.View));
 	return true;
 }
 

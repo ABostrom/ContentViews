@@ -29,10 +29,14 @@ public:
 	/** The view assets the list on the left shows, in order. */
 	TArray<FSoftObjectPath> GetListedViews() const;
 
+	/** Lists the views this user hid too (the Show Hidden toggle under the list). */
+	void SetShowHidden(bool bShow);
+
 private:
 	using FViewItem = TSharedPtr<FAssetData>;
 
 	void RefreshViewList();
+	TSharedPtr<SWidget> MakeViewContextMenu();
 	void RebuildPicker();
 	TSharedRef<ITableRow> MakeViewRow(FViewItem Item, const TSharedRef<STableViewBase>& Owner);
 	void HandleViewSelected(FViewItem Item, ESelectInfo::Type SelectInfo);
@@ -44,4 +48,6 @@ private:
 	TSharedPtr<SListView<FViewItem>> ViewList;
 	TSharedPtr<SBox> PickerHost;
 	TWeakObjectPtr<UContentViewBase> Shown;
+	/** The views this user hid are listed too, dimmed. */
+	bool bShowHidden = false;
 };

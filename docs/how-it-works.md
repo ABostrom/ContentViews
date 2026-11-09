@@ -155,6 +155,26 @@ Scene Cost view lists placements, not assets, so it adds none). The filter
 passes an item if it is a row of the view and meets the view's filters, so any Content Browser can show a view's
 selection inside its normal folders.
 
+## Hiding views
+
+A long view list gets noisy, so each user can hide the views he does not use. The choice is
+`UContentViewsUserSettings` (`Public/ContentViewsUserSettings.h`), a `UDeveloperSettings` saved in
+`EditorPerProjectUserSettings`: it is never shared and never written into a view asset. It holds `HiddenViews`, the
+hidden views by asset path, and shows under Editor Preferences > Plugins > Content Views, where clearing the list shows
+every view again.
+
+- In the tab, right-click a view: **Hide View**. **Show Hidden** under the list lists the hidden ones too, dimmed, and
+  right-click on one gives **Unhide**.
+- `UE::ContentViews::FindViews` leaves hidden views out unless asked for them (`bIncludeHidden`), so the tab, the
+  frontend filters, the TEDS Content Sources and `ListViews` all follow it. `ListViews` takes `bIncludeHidden` for tools
+  and agents that need every view.
+- A hidden view still runs by name: `FindViewAsset`, `DescribeView`, `RunView` and the Scene Cost tools reach it, and
+  their "no view named" errors list hidden views too. Hiding tidies the lists; it takes nothing away.
+- `UContentViewsUserSettings::SetHidden` saves the choice and broadcasts `OnHiddenViewsChanged`, as does an edit in
+  Editor Preferences: the open tab relists, and the TEDS backend drops a hidden view's source and builds an unhidden
+  one's. The frontend filters are built when a Content Browser builds its filter list, so an open Content Browser
+  picks up the change the next time it does.
+
 ## Why nothing loads
 
 Every value comes from `FAssetData`: the registry's record of an asset, read from the package header when the editor
@@ -172,7 +192,7 @@ exposes it as `ContentViews.ContentViewsTools`:
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `ListViews` | none | every view's name, asset path and archetype; for a view of assets, its row class and columns |
+| `ListViews` | `bIncludeHidden` (optional) | every view's name, asset path and archetype; for a view of assets, its row class and columns. Views this user hid are left out unless `bIncludeHidden` |
 | `DescribeView` | `view` | its columns with types, its filters, its default sort and its row count |
 | `RunView` | `view`, `filters`, `sortColumn`, `bSortDescending`, `limit` | rows: `assetPath` and `values` |
 | `ExportView` | `view` | the view's definition as data |

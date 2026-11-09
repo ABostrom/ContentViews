@@ -14,6 +14,7 @@
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
 #include "ContentViewWidgets.h"
+#include "ContentViewsUserSettings.h"
 #include "Editor.h"
 #include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandList.h"
@@ -28,8 +29,11 @@
 #include "ToolMenus.h"
 #include "UObject/UObjectGlobals.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 
@@ -338,11 +342,29 @@ void SContentViewsTab::Construct(const FArguments& InArgs)
 		+ SSplitter::Slot()
 		.Value(0.16f)
 		[
-			SAssignNew(ViewList, SListView<FViewItem>)
-			.ListItemsSource(&ViewItems)
-			.SelectionMode(ESelectionMode::Single)
-			.OnGenerateRow(this, &SContentViewsTab::MakeViewRow)
-			.OnSelectionChanged(this, &SContentViewsTab::HandleViewSelected)
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.FillHeight(1.f)
+			[
+				SAssignNew(ViewList, SListView<FViewItem>)
+				.ListItemsSource(&ViewItems)
+				.SelectionMode(ESelectionMode::Single)
+				.OnGenerateRow(this, &SContentViewsTab::MakeViewRow)
+				.OnSelectionChanged(this, &SContentViewsTab::HandleViewSelected)
+				.OnContextMenuOpening(this, &SContentViewsTab::MakeViewContextMenu)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(6.f, 4.f)
+			[
+				SNew(SCheckBox)
+				.IsChecked_Lambda([this]() { return bShowHidden ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+				.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { SetShowHidden(State == ECheckBoxState::Checked); })
+				.ToolTipText(LOCTEXT("ShowHiddenTip", "List the views you hid too, dimmed, so you can unhide them."))
+				[
+					SNew(STextBlock).Text(LOCTEXT("ShowHidden", "Show Hidden"))
+				]
+			]
 		]
 		+ SSplitter::Slot()
 		.Value(0.84f)
@@ -356,6 +378,7 @@ void SContentViewsTab::Construct(const FArguments& InArgs)
 	Registry.OnAssetRemoved().AddSP(this, &SContentViewsTab::HandleAssetsChanged);
 	Registry.OnAssetRenamed().AddSP(this, &SContentViewsTab::HandleAssetRenamed);
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &SContentViewsTab::HandleObjectChanged);
+	UContentViewsUserSettings::OnHiddenViewsChanged().AddSP(this, &SContentViewsTab::RefreshViewList);
 
 	RefreshViewList();
 	if (ViewItems.Num() > 0)
@@ -373,6 +396,7 @@ SContentViewsTab::~SContentViewsTab()
 		Module->Get().OnAssetRenamed().RemoveAll(this);
 	}
 	FCoreUObjectDelegates::OnObjectPropertyChanged.RemoveAll(this);
+	UContentViewsUserSettings::OnHiddenViewsChanged().RemoveAll(this);
 }
 
 void SContentViewsTab::ShowView(const UContentViewBase& View)
@@ -403,7 +427,7 @@ void SContentViewsTab::RefreshViewList()
 {
 	const FSoftObjectPath Selected = Shown.IsValid() ? FSoftObjectPath(Shown.Get()) : FSoftObjectPath();
 	ViewItems.Reset();
-	for (const FAssetData& View : UE::ContentViews::FindViews())
+	for (const FAssetData& View : UE::ContentViews::FindViews(bShowHidden))
 	{
 		ViewItems.Add(MakeShared<FAssetData>(View));
 	}
@@ -436,8 +460,11 @@ TSharedRef<ITableRow> SContentViewsTab::MakeViewRow(FViewItem Item, const TShare
 		Icon = TEXT("ClassIcon.DataAsset");
 	}
 
+	const bool bHidden = UContentViewsUserSettings::IsHidden(Item->GetSoftObjectPath());
 	return SNew(STableRow<FViewItem>, Owner)
 		.Padding(FMargin(6.f, 4.f))
+		.RenderOpacity(bHidden ? 0.45f : 1.f)
+		.ToolTipText(bHidden ? LOCTEXT("HiddenRowTip", "Hidden: only Show Hidden lists it. Right-click to unhide.") : FText::GetEmpty())
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
@@ -456,6 +483,31 @@ TSharedRef<ITableRow> SContentViewsTab::MakeViewRow(FViewItem Item, const TShare
 				SNew(STextBlock).Text(Label)
 			]
 		];
+}
+
+void SContentViewsTab::SetShowHidden(bool bShow)
+{
+	bShowHidden = bShow;
+	RefreshViewList();
+}
+
+TSharedPtr<SWidget> SContentViewsTab::MakeViewContextMenu()
+{
+	const TArray<FViewItem> Selected = ViewList->GetSelectedItems();
+	if (Selected.IsEmpty() || !Selected[0].IsValid())
+	{
+		return nullptr;
+	}
+	const FSoftObjectPath Path = Selected[0]->GetSoftObjectPath();
+	const bool bHidden = UContentViewsUserSettings::IsHidden(Path);
+	FMenuBuilder Menu(/*bInShouldCloseWindowAfterMenuSelection*/ true, nullptr);
+	Menu.AddMenuEntry(
+		bHidden ? LOCTEXT("UnhideView", "Unhide") : LOCTEXT("HideView", "Hide View"),
+		bHidden ? LOCTEXT("UnhideViewTip", "List this view again everywhere views are listed.")
+			: LOCTEXT("HideViewTip", "Leave this view out of every list of views, for you only. Show Hidden lists it again."),
+		FSlateIcon(FAppStyle::GetAppStyleSetName(), bHidden ? "Icons.Visible" : "Icons.Hidden"),
+		FUIAction(FExecuteAction::CreateLambda([Path, bHidden]() { UContentViewsUserSettings::SetHidden(Path, !bHidden); })));
+	return Menu.MakeWidget();
 }
 
 void SContentViewsTab::HandleViewSelected(FViewItem Item, ESelectInfo::Type SelectInfo)

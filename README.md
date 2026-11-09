@@ -30,6 +30,8 @@ What you get:
   its estimated size, an alert on a non-Nanite mesh over a budget, and each mesh's placements with *Select in Level*
   and *Frame*. It updates as actors are placed or deleted and as PCG regenerates. Example: `/ContentViews/Examples/CV_SceneCost`
   with the level `/ContentViews/Examples/L_SceneCostExample`.
+- **Hide views you don't use**: right-click a view in the tab, *Hide View*. It leaves every list for you only (a
+  per-user setting under Editor Preferences > Plugins > Content Views); *Show Hidden* lists it again to unhide.
 
 **Project Settings > Plugins > Content Views > Backend** picks Legacy (the default), TEDS or Both. Both read the same
 view assets; the switch applies at once. See [docs/how-it-works.md](docs/how-it-works.md).
@@ -135,7 +137,7 @@ are small providers registered by name; see [docs/how-it-works.md](docs/how-it-w
 
 `ContentViews.*` automation tests run in an editor: a view over a class and its Blueprint children with typed values,
 every filter operator, validation, the `RunView` tool called through the toolset registry the way MCP calls it, and a new
-view and an unsaved new row reaching an open tab, and Used By naming the level that places an engine mesh. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
+view and an unsaved new row reaching an open tab, and Used By naming the level that places an engine mesh, and a view hidden by the user leaving every list until unhidden. `ContentViews.Teds.*` checks the TEDS backend against the legacy one:
 the same rows and values, a number column sorted by TEDS's own sorter, a value filter as the filter bar runs it, a
 provider's alert, the backend switch, a new view and row appearing while the editor runs, double-click and the right-click menu, tiles in the default sort, a colour column named for itself, Heavy Meshes' threshold and a live edit of it, and Scene Cost counting placed, deleted and instanced meshes (including instances added with no `Modify`, as PCG adds them) and its budget alert, Scene Cost in the tab and through its tools, the example level's counts and alert, and views already on disk getting their sources at startup (not only views made while the editor runs). `ContentViews.EveryListFindsAViewOfAnotherArchetype` checks the tab, the filter menu and `ListViews` against a view that is not of assets. TEDS is off in
 commandlets, so run them in an editor (`-ExecCmds="Automation RunTests ContentViews"`), not with `-run=`.

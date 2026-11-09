@@ -189,6 +189,8 @@ namespace UE::ContentViews::Teds
 
 	private:
 		void ApplySetting();
+		/** The views this user hid lose their sources; the views unhidden get theirs back. */
+		void ApplyHidden();
 		void RefreshViews();
 		void BuildView(UContentViewDefinition& View);
 		void DropView(const FSoftObjectPath& Path);

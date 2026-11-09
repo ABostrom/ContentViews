@@ -93,7 +93,7 @@ USceneCostView* USceneCostTools::FindSceneViewOrRaise(const FString& View)
 	if (!Found)
 	{
 		TArray<FString> Names;
-		for (const FAssetData& Asset : UE::ContentViews::FindViews())
+		for (const FAssetData& Asset : UE::ContentViews::FindViews(/*bIncludeHidden*/ true))
 		{
 			if (Asset.IsInstanceOf(USceneCostView::StaticClass()))
 			{

@@ -3,6 +3,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentViewColumns.h"
+#include "ContentViewsUserSettings.h"
 #include "Engine/Blueprint.h"
 #include "Misc/PackageName.h"
 
@@ -332,18 +333,23 @@ namespace UE::ContentViews
 		});
 	}
 
-	TArray<FAssetData> FindViews()
+	TArray<FAssetData> FindViews(bool bIncludeHidden)
 	{
 		TArray<FAssetData> Views;
 		ContentViewRegistry().GetAssetsByClass(UContentViewBase::StaticClass()->GetClassPathName(), Views,
 			/*bSearchSubClasses*/ true);
+		if (!bIncludeHidden)
+		{
+			Views.RemoveAll([](const FAssetData& View) { return UContentViewsUserSettings::IsHidden(View.GetSoftObjectPath()); });
+		}
 		Views.Sort([](const FAssetData& A, const FAssetData& B) { return A.AssetName.LexicalLess(B.AssetName); });
 		return Views;
 	}
 
 	UContentViewBase* FindViewAsset(const FString& Name)
 	{
-		for (const FAssetData& View : FindViews())
+		// A hidden view is still run by name: hiding tidies the lists, it does not take the view away.
+		for (const FAssetData& View : FindViews(/*bIncludeHidden*/ true))
 		{
 			FText Shown;
 			const bool bShownMatches = View.GetTagValue(GET_MEMBER_NAME_CHECKED(UContentViewBase, DisplayName), Shown)

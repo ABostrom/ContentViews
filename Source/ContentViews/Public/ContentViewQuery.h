@@ -82,8 +82,11 @@ namespace UE::ContentViews
 	/** Whether some row of the view carries a value for Column (a registered column always does). */
 	CONTENTVIEWS_API bool IsKnownColumn(const UContentViewDefinition& View, FName Column);
 
-	/** Every view asset of every archetype (asset views, Scene Cost, ...), by name. */
-	CONTENTVIEWS_API TArray<FAssetData> FindViews();
+	/**
+	 * Every view asset of every archetype (asset views, Scene Cost, ...), by name. The views this user hid
+	 * (UContentViewsUserSettings) are left out unless bIncludeHidden.
+	 */
+	CONTENTVIEWS_API TArray<FAssetData> FindViews(bool bIncludeHidden = false);
 
 	/** The view of any archetype named Name: its object path, asset name or display name. Loads the view asset. */
 	CONTENTVIEWS_API UContentViewBase* FindViewAsset(const FString& Name);
