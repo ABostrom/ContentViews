@@ -1,7 +1,6 @@
 #include "ContentViewsFilterExtension.h"
 #include "ContentViewsSettings.h"
 
-#include "Algo/AllOf.h"
 #include "ContentBrowserItem.h"
 #include "ContentViewDefinition.h"
 #include "ContentViewQuery.h"
@@ -45,14 +44,8 @@ namespace
 		{
 			FAssetData Asset;
 			const UClass* Class = RowClass.Get();
-			if (!Class || !InItem.Legacy_TryGetAssetData(Asset) || !UE::ContentViews::IsRowOf(Asset, *Class, bIncludeSubclasses))
-			{
-				return false;
-			}
-			return Algo::AllOf(Filters, [&Asset](const FContentViewFilter& Filter)
-			{
-				return UE::ContentViews::PassesFilter(Asset, Filter);
-			});
+			return Class && InItem.Legacy_TryGetAssetData(Asset)
+				&& UE::ContentViews::IsViewRow(Asset, *Class, bIncludeSubclasses, Filters);
 		}
 
 	private:

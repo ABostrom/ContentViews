@@ -66,14 +66,11 @@ namespace UE::ContentViews::Teds
 	/** Whether View has a Content Source in the Content Browser's source bar. */
 	CONTENTVIEWSTEDS_API bool HasContentSource(const UContentViewDefinition& View);
 
-	/** View's rows as TEDS holds them, before any filter, with each column's value read back from its TEDS column. */
+	/** View's rows as TEDS holds them (those meeting its filters), with each column's value read back from its TEDS column. */
 	CONTENTVIEWSTEDS_API TArray<FContentViewRow> ReadRows(const UContentViewDefinition& View);
 
 	/** View's rows' asset paths ordered by Column through TEDS's own generated sorter, as the table's header sorts. */
 	CONTENTVIEWSTEDS_API TArray<FString> SortRows(const UContentViewDefinition& View, FName Column, bool bDescending);
-
-	/** View's rows' asset paths that pass Filter as the source's filter bar runs it. */
-	CONTENTVIEWSTEDS_API TArray<FString> FilterRows(const UContentViewDefinition& View, const FContentViewFilter& Filter);
 
 	/** The message of each alert a row of View carries, by asset path. */
 	CONTENTVIEWSTEDS_API TMap<FString, FString> ReadAlerts(const UContentViewDefinition& View);

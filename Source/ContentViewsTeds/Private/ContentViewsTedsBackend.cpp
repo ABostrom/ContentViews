@@ -2,6 +2,7 @@
 
 #include "ContentViewsTeds.h"
 
+#include "Algo/AnyOf.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserModule.h"
 #include "ContentViewQuery.h"
@@ -242,16 +243,6 @@ namespace UE::ContentViews::Teds
 		return Rows;
 	}
 
-	TConstQueryFunction<bool> FBackend::MakeValueFilter(const FContentViewFilter& Filter) const
-	{
-		ICoreProvider* Store = Storage;
-		return BuildConstQueryFunction<bool>([Store, Filter](TConstQueryContext<SingleRowInfo> Context)
-		{
-			const FAssetDataColumn_Experimental* Asset = Store->GetColumn<FAssetDataColumn_Experimental>(Context.GetCurrentRow());
-			return Asset && PassesFilter(Asset->AssetData, Filter);
-		});
-	}
-
 	FContentViewValue FBackend::ReadValue(RowHandle Row, const FColumnSlot& Slot) const
 	{
 		switch (Slot.Kind)
@@ -402,6 +393,8 @@ namespace UE::ContentViews::Teds
 		State.View = &View;
 		State.RowClass = ResolveRowClass(View);
 		State.bIncludeSubclasses = View.bIncludeSubclasses;
+		State.Filters = View.Filters;
+		State.bFiltersReadComputed = Algo::AnyOf(View.Filters, [](const FContentViewFilter& Filter) { return IsColumnRegistered(Filter.Column); });
 		State.RowTag = Storage->GenerateDynamicColumn({.TemplateType = FContentViewRowTag::StaticStruct(), .Identifier = FName(Path.ToString())});
 
 		const TArray<FContentViewColumnInfo> Infos = DescribeColumns(View);
@@ -524,7 +517,15 @@ namespace UE::ContentViews::Teds
 			bComputedDirty = false;
 			for (const TPair<FSoftObjectPath, FViewState>& View : Views)
 			{
-				if (View.Value.HasComputed())
+				if (View.Value.bFiltersReadComputed)
+				{
+					// A row outside the view may now pass its filters, so every asset is looked at again.
+					Storage->RunQuery(AllAssetsQuery, CreateDirectQueryCallbackBinding([this](IDirectQueryContext&, RowHandle Row)
+					{
+						PendingComputed.Add(Row);
+					}));
+				}
+				else if (View.Value.HasComputed())
 				{
 					PendingComputed.Append(RowsOf(View.Value));
 				}
@@ -555,25 +556,26 @@ namespace UE::ContentViews::Teds
 		{
 			const FViewState& View = Pair.Value;
 			const UClass* RowClass = View.RowClass.Get();
-			const bool bIsRow = RowClass && IsRowOf(Asset, *RowClass, View.bIncludeSubclasses);
-			if (!bComputedOnly)
+			// The legacy backend's own test, filters and all, so both list the same rows.
+			const bool bIsRow = RowClass && IsViewRow(Asset, *RowClass, View.bIncludeSubclasses, View.Filters);
+			const bool bWasRow = Storage->HasColumns(Row, TConstArrayView<const UScriptStruct*>({View.RowTag}));
+			if (bIsRow && !bWasRow)
 			{
-				if (bIsRow)
-				{
-					Storage->AddColumn(Row, View.RowTag);
-				}
-				else if (Storage->HasColumns(Row, TConstArrayView<const UScriptStruct*>({View.RowTag})))
-				{
-					Storage->RemoveColumn(Row, View.RowTag);
-				}
+				Storage->AddColumn(Row, View.RowTag);
+			}
+			else if (!bIsRow && bWasRow)
+			{
+				Storage->RemoveColumn(Row, View.RowTag);
 			}
 			if (!bIsRow)
 			{
 				continue;
 			}
+			// A row that has just joined (a computed filter it now passes) has none of its columns yet.
+			const bool bAll = !bComputedOnly || !bWasRow;
 			for (const FColumnSlot& Slot : View.Columns)
 			{
-				if (Slot.Kind != EColumnKind::AssetName && (!bComputedOnly || Slot.bComputed))
+				if (Slot.Kind != EColumnKind::AssetName && (bAll || Slot.bComputed))
 				{
 					WriteValue(Row, Slot, Slot.Reader->GetValue(Asset));
 				}

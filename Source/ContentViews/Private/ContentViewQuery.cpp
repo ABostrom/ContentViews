@@ -1,5 +1,6 @@
 #include "ContentViewQuery.h"
 
+#include "Algo/AllOf.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "ContentViewColumns.h"
@@ -51,8 +52,8 @@ namespace
 		return false;
 	}
 
-	/** Every asset that is a row of View, before its filters. */
-	TArray<FAssetData> ContentViewCandidates(const UContentViewDefinition& View)
+	/** Every asset that is a row of View meeting Filters (none: every row, before the view's own). */
+	TArray<FAssetData> ContentViewCandidates(const UContentViewDefinition& View, TConstArrayView<FContentViewFilter> Filters = {})
 	{
 		TArray<FAssetData> Found;
 		const UClass* RowClass = UE::ContentViews::ResolveRowClass(View);
@@ -61,11 +62,9 @@ namespace
 			return Found;
 		}
 		ContentViewRegistry().GetAssets(UE::ContentViews::MakeRowFilter(*RowClass, View.bIncludeSubclasses), Found);
-		Found.RemoveAll([RowClass, &View](const FAssetData& Asset)
+		Found.RemoveAll([RowClass, &View, Filters](const FAssetData& Asset)
 		{
-			// An external actor is a part of its level, not an asset of its own: an Actor view must not list them.
-			return !Asset.GetOptionalOuterPathName().IsNone()
-				|| !UE::ContentViews::IsRowOf(Asset, *RowClass, View.bIncludeSubclasses);
+			return !UE::ContentViews::IsViewRow(Asset, *RowClass, View.bIncludeSubclasses, Filters);
 		});
 		return Found;
 	}
@@ -166,7 +165,7 @@ namespace UE::ContentViews
 		{
 			return LOCTEXT("FilterNoColumn", "names no column");
 		}
-		if (Filter.Value.TrimStartAndEnd().IsEmpty())
+		if (Filter.Operator != EContentViewFilterOp::HasValue && Filter.Value.TrimStartAndEnd().IsEmpty())
 		{
 			return LOCTEXT("FilterNoValue", "has no value to compare with");
 		}
@@ -201,32 +200,25 @@ namespace UE::ContentViews
 			return Value.bIsSet && (Value.String.Contains(Wanted) || Value.GetDisplay().Contains(Wanted));
 		case EContentViewFilterOp::HasTag:
 			return Value.bIsSet && ContentViewHoldsTag(Value.String, Wanted);
+		case EContentViewFilterOp::HasValue:
+			return Value.bIsSet;
 		}
 		return false;
 	}
 
+	bool IsViewRow(const FAssetData& Asset, const UClass& RowClass, bool bIncludeSubclasses,
+		TConstArrayView<FContentViewFilter> Filters)
+	{
+		// An external actor is a part of its level, not an asset of its own: an Actor view must not list them.
+		return Asset.GetOptionalOuterPathName().IsNone() && IsRowOf(Asset, RowClass, bIncludeSubclasses)
+			&& Algo::AllOf(Filters, [&Asset](const FContentViewFilter& Filter) { return PassesFilter(Asset, Filter); });
+	}
+
 	TArray<FAssetData> GatherRows(const UContentViewDefinition& View, TConstArrayView<FContentViewFilter> Extra)
 	{
-		TArray<FAssetData> Rows = ContentViewCandidates(View);
-		Rows.RemoveAll([&View, Extra](const FAssetData& Asset)
-		{
-			for (const FContentViewFilter& Filter : View.Filters)
-			{
-				if (!PassesFilter(Asset, Filter))
-				{
-					return true;
-				}
-			}
-			for (const FContentViewFilter& Filter : Extra)
-			{
-				if (!PassesFilter(Asset, Filter))
-				{
-					return true;
-				}
-			}
-			return false;
-		});
-		return Rows;
+		TArray<FContentViewFilter> Filters(View.Filters);
+		Filters.Append(Extra.GetData(), Extra.Num());
+		return ContentViewCandidates(View, Filters);
 	}
 
 	void SortRows(TArray<FAssetData>& Rows, const FContentViewSort& Sort)

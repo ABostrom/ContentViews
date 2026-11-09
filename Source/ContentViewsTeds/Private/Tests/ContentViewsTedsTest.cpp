@@ -275,34 +275,68 @@ bool FContentViewsTedsSortTest::RunTest(const FString& Parameters)
 }
 
 /**
- * Situation: the filter Speed >= 60 run as the source's filter bar runs it.
- * Why it matters: a value filter is how a view says "Pace >= 80"; the filter bar must keep what the legacy backend keeps.
- * Pass: the three rows at 60 or more, as the legacy backend gives them.
+ * Situation: a view over the fixture with the filters Speed >= 60 and Crew has a value (the Blueprint child, at 65, has
+ * no crew), read from the TEDS backend and from the legacy backend.
+ * Why it matters: a view's filters say which assets are its rows; a Content Source that lists rows its filters refuse
+ * shows a designer a different view from the one the table and the tools show.
+ * Pass: both backends, and the open Content Source, list Row_Fast and Row_Hundred and nothing else of the fixture's.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsFilterTest,
-	"ContentViews.Teds.AValueFilterKeepsTheRowsTheLegacyBackendKeeps",
+	"ContentViews.Teds.AFilteredViewListsTheSameRowsInBothBackends",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FContentViewsTedsFilterTest::RunTest(const FString& Parameters)
 {
 	TSharedRef<FTedsTestRows> Rows = MakeShared<FTedsTestRows>();
-	TedsTestWhenRows(*this, Rows, [Rows]() { return Rows->View; }, 4, [this, Rows]()
+	UContentViewDefinition* Filtered = Rows->MakeView(TEXT("CV_ContentViewsTedsFiltered"));
+	FContentViewFilter& AtLeast = Filtered->Filters.AddDefaulted_GetRef();
+	AtLeast.Column = TEXT("Speed");
+	AtLeast.Operator = EContentViewFilterOp::AtLeast;
+	AtLeast.Value = TEXT("60");
+	FContentViewFilter& HasCrew = Filtered->Filters.AddDefaulted_GetRef();
+	HasCrew.Column = TEXT("Crew");
+	HasCrew.Operator = EContentViewFilterOp::HasValue;
+	FPropertyChangedEvent Changed(nullptr);
+	FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Filtered, Changed);
+
+	TedsTestWhenRows(*this, Rows, [Filtered]() { return Filtered; }, 2, [this, Rows, Filtered]()
 	{
-		FContentViewFilter AtLeast;
-		AtLeast.Column = TEXT("Speed");
-		AtLeast.Operator = EContentViewFilterOp::AtLeast;
-		AtLeast.Value = TEXT("60");
-		TArray<FString> Teds = Rows->Mine(UE::ContentViews::Teds::FilterRows(*Rows->View, AtLeast));
-		Teds.Sort();
-		TArray<FString> Legacy;
-		for (const FContentViewRow& Row : UE::ContentViews::RunView(*Rows->View, {AtLeast}, FContentViewSort(), 0))
+		const auto Joined = [&Rows](TArray<FString> Paths)
 		{
-			Legacy.Add(Row.AssetPath);
+			Paths = Rows->Mine(Paths);
+			Paths.Sort();
+			return FString::Join(Paths, TEXT(","));
+		};
+		TArray<FString> Teds;
+		for (const FContentViewRow& Row : UE::ContentViews::Teds::ReadRows(*Filtered))
+		{
+			Teds.Add(Row.AssetPath);
 		}
-		Legacy = Rows->Mine(Legacy);
-		Legacy.Sort();
-		TestEqual(TEXT("TEDS keeps the three fast rows"), FString::Join(Teds, TEXT(",")), FString(TEXT("BP_Row_Child,Row_Fast,Row_Hundred")));
-		TestEqual(TEXT("as the legacy backend does"), FString::Join(Teds, TEXT(",")), FString::Join(Legacy, TEXT(",")));
+		TArray<FString> Legacy;
+		for (const FAssetData& Asset : UE::ContentViews::GatherRows(*Filtered))
+		{
+			Legacy.Add(Asset.GetSoftObjectPath().ToString());
+		}
+		TestEqual(TEXT("the legacy backend keeps the fast rows with a crew"), Joined(Legacy), FString(TEXT("Row_Fast,Row_Hundred")));
+		TestEqual(TEXT("TEDS keeps the same rows"), Joined(Teds), Joined(Legacy));
+
+		using namespace UE::Editor::DataStorage;
+		const TSharedRef<SContentViewsSource> Open = SNew(SContentViewsSource, FSoftObjectPath(Filtered));
+		QueryStack::FExplicitUpdateExecutor Executor(TEXT("ContentViewsTest"), Open->GetShownRows());
+		for (int32 Pass = 0; Pass < 200; ++Pass)
+		{
+			Executor.Update();
+		}
+		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
+		TArray<FString> Shown;
+		for (const RowHandle Row : Open->GetShownRows()->GetRows())
+		{
+			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
+			{
+				Shown.Add(Asset->AssetData.GetSoftObjectPath().ToString());
+			}
+		}
+		TestEqual(TEXT("the open Content Source shows the same rows"), Joined(Shown), Joined(Legacy));
 	});
 	return true;
 }
@@ -588,7 +622,7 @@ namespace
  * Why it matters: the threshold is a field on the view asset, so a designer tunes the view by editing it; an open view
  * that keeps the old rows tells him the wrong thing.
  * Pass: every row is at or above the threshold, not Nanite and in descending order in both backends; after the edit the
- * open source rebuilds, and its filter bar and the legacy backend keep only meshes at or above 5000.
+ * open source rebuilds, and once the backend catches up it and the legacy backend keep only meshes at or above 5000.
  */
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FContentViewsTedsHeavyMeshesTest,
 	"ContentViews.Teds.HeavyMeshesKeepsMeshesAtItsThresholdAndFollowsAnEdit",
@@ -620,26 +654,38 @@ bool FContentViewsTedsHeavyMeshesTest::RunTest(const FString& Parameters)
 		TedsTestCheckHeavy(*this, *Heavy, 1000.0, TEXT("at 1000"));
 		return true;
 	}));
-	AddCommand(new FFunctionLatentCommand([this, Rows, Heavy]()
+	TSharedRef<TSharedPtr<SContentViewsSource>> Open = MakeShared<TSharedPtr<SContentViewsSource>>();
+	TSharedRef<double> Edited = MakeShared<double>(0.0);
+	AddCommand(new FFunctionLatentCommand([this, Heavy, Open, Edited]()
 	{
-		const TSharedRef<SContentViewsSource> Open = SNew(SContentViewsSource, FSoftObjectPath(Heavy));
-		const TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Before = Open->GetShownRows();
+		*Edited = FPlatformTime::Seconds();
+		*Open = SNew(SContentViewsSource, FSoftObjectPath(Heavy));
+		const TSharedPtr<UE::Editor::DataStorage::QueryStack::IRowNode> Before = (*Open)->GetShownRows();
 		Heavy->Filters[0].Value = TEXT("5000");
 		FPropertyChangedEvent Changed(nullptr);
 		FCoreUObjectDelegates::OnObjectPropertyChanged.Broadcast(Heavy, Changed);
-		TestTrue(TEXT("the open source rebuilt"), Open->GetShownRows() != Before);
+		TestTrue(TEXT("the open source rebuilt"), (*Open)->GetShownRows() != Before);
+		return true;
+	}));
+	// The filters decide which rows carry the view's tag, so the rows move once the backend has caught up with the edit.
+	AddCommand(new FFunctionLatentCommand([this, Rows, Heavy, Open, Edited]()
+	{
+		if (!UE::ContentViews::Teds::IsCaughtUp() && FPlatformTime::Seconds() - *Edited < 120.0)
+		{
+			return false;
+		}
 		TedsTestCheckHeavy(*this, *Heavy, 5000.0, TEXT("at 5000"));
 
 		using namespace UE::Editor::DataStorage;
 		ICoreProvider* Storage = GetMutableDataStorageFeature<ICoreProvider>(StorageFeatureName);
-		QueryStack::FExplicitUpdateExecutor Executor(TEXT("ContentViewsTest"), Open->GetShownRows());
+		QueryStack::FExplicitUpdateExecutor Executor(TEXT("ContentViewsTest"), (*Open)->GetShownRows());
 		for (int32 Pass = 0; Pass < 200; ++Pass)
 		{
 			Executor.Update();
 		}
 		int32 Shown = 0;
 		bool bAllHeavy = true;
-		for (const RowHandle Row : Open->GetShownRows()->GetRows())
+		for (const RowHandle Row : (*Open)->GetShownRows()->GetRows())
 		{
 			if (const FAssetDataColumn_Experimental* Asset = Storage->GetColumn<FAssetDataColumn_Experimental>(Row))
 			{
@@ -647,7 +693,7 @@ bool FContentViewsTedsHeavyMeshesTest::RunTest(const FString& Parameters)
 				bAllHeavy &= TedsTestTriangles(Asset->AssetData) >= 5000.0;
 			}
 		}
-		TestEqual(TEXT("the source's filter bar keeps what the legacy backend keeps"), Shown,
+		TestEqual(TEXT("the source shows what the legacy backend keeps"), Shown,
 			UE::ContentViews::RunView(*Heavy, {}, FContentViewSort(), 0).Num());
 		TestTrue(TEXT("and only meshes at or above 5000"), bAllHeavy);
 		return true;

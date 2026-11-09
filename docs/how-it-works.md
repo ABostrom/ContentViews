@@ -21,7 +21,7 @@ archetype, `USceneCostView`, whose rows are the meshes placed in the open level.
 | `Columns` | Column names, left to right. |
 | `ColumnLabels` | A header for a column whose name does not read well (`NaniteEnabled` as *Nanite*). Others read their name in words. |
 | `DefaultSort` | A column and a direction. None sorts by name. |
-| `Filters` | `FContentViewFilter` rows: column, operator (`=`, `!=`, `>=`, `<=`, `contains`, `has tag`), value. A row must meet all of them. |
+| `Filters` | `FContentViewFilter` rows: column, operator (`=`, `!=`, `>=`, `<=`, `contains`, `has tag`, `has a value`), value (not read by `has a value`). A row must meet all of them. |
 | `Mode` | List (a column view) or Tiles (thumbnails). |
 
 `DisplayName` and `Icon` are themselves `AssetRegistrySearchable`, so the tab's list of views loads nothing either.
@@ -61,6 +61,11 @@ FARFilter MakeRowFilter(const UClass& RowClass, bool bIncludeSubclasses)
 
 `IsRowOf` reads a Blueprint's `GeneratedClass` tag and walks its parents: a loaded class answers with `IsChildOf`, and
 an unloaded Blueprint parent answers through its own asset's `ParentClass` tag. No class or asset is loaded to decide.
+
+`IsViewRow(Asset, RowClass, bIncludeSubclasses, Filters)` is the whole test: `IsRowOf`, not a level's external actor (a
+World Partition level stores each placed actor as an asset of its own, which is part of its level, not a row), and every
+filter passed. The tab, the frontend filters, `GatherRows` and the TEDS backend all decide a view's rows with it, so
+every list agrees.
 
 ## Columns
 
@@ -135,7 +140,7 @@ For a view of assets, the right pane is built with `IContentBrowserSingleton::Cr
 widget the Content Browser's asset view is made of, so it looks and behaves like the Content Browser:
 
 - `FAssetPickerConfig::Filter` is `MakeRowFilter` for the row class.
-- `OnShouldFilterAsset` does the rest per asset: `IsRowOf`, then every filter of the view.
+- `OnShouldFilterAsset` does the rest per asset: `IsViewRow` with the view's filters.
 - `CustomColumns` gets one `FAssetViewCustomColumn` per view column. Its data delegate gives the sortable text (numbers
   as numbers, with `TT_Numerical` so the column sorts numerically), its display delegate gives the words.
 - Every other column is hidden: `HiddenColumnNames` for the fixed ones (class, path, size, revision control) and
@@ -271,7 +276,9 @@ State.RowTag = Storage->GenerateDynamicColumn({.TemplateType = FContentViewRowTa
 return Select().ReadOnly<FAssetDataColumn_Experimental, FAssetNameColumn>().Where().All(RowTag).Compile();
 ```
 
-Rows are tagged by the same `IsRowOf` the legacy backend uses, so a Blueprint is a row by its parent class tags.
+Rows are tagged by the same `IsViewRow` the legacy backend uses, filters and all, so a Blueprint is a row by its parent
+class tags and both backends list the same rows. A view whose filter reads a computed column looks at every asset again
+when anything changes, since a value read from other assets can move a row in or out.
 
 **Nothing runs every frame over every row.** TedsAssetData stamps `FUpdatedAssetDataTag` on a row for the frame its
 asset is added or changes. The backend's one processor matches only rows carrying that tag, and only notes them:
@@ -350,18 +357,9 @@ Alerts::AddAlert(*Storage, Row, AlertName, Message, UE::Editor::DataStorage::Col
 
 **Filters and search.** A view's source shows an `STedsSearchBox` (it runs the view's query itself and searches the
 selected columns' `Searchable` fields, which is why the query selects the name column) and an `STedsFilterBar` (with a `FilterBarIdentifier`
-per view, so its state is saved) over the view's rows. The view's own filters become predicate filters, on as it opens,
-and each runs the legacy backend's own test on the row's asset data, so both backends keep the same rows:
-
-```cpp
-return BuildConstQueryFunction<bool>([Store, Filter](TConstQueryContext<SingleRowInfo> Context)
-{
-	const FAssetDataColumn_Experimental* Asset = Store->GetColumn<FAssetDataColumn_Experimental>(Context.GetCurrentRow());
-	return Asset && PassesFilter(Asset->AssetData, Filter);
-});
-```
-
-Each column also gets a shape filter, *Has <column>*: a registered query for the rows whose table holds that column.
+per view, so its state is saved) over the view's rows. The view's own filters are not in the bar: they already decided
+which rows carry the view's tag. Each column gets a shape filter, *Has <column>*: a registered query for the rows whose
+table holds that column.
 
 **The host widget.** The engine draws an active Content Source with the widget registered for the purpose
 `ContentBrowser.AssetView`, and its own (in TedsContentBrowser) has no search box or filter bar. That purpose is unique

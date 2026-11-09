@@ -64,6 +64,10 @@ namespace UE::ContentViews::Teds
 		TWeakObjectPtr<UContentViewDefinition> View;
 		TWeakObjectPtr<UClass> RowClass;
 		bool bIncludeSubclasses = true;
+		/** The view's own filters: a row that fails one is not a row of the view (UE::ContentViews::IsViewRow). */
+		TArray<FContentViewFilter> Filters;
+		/** Some filter reads a computed column, so any change may move a row in or out of the view. */
+		bool bFiltersReadComputed = false;
 		/** The tag every row of the view carries. */
 		const UScriptStruct* RowTag = nullptr;
 		TArray<FColumnSlot> Columns;
@@ -131,9 +135,6 @@ namespace UE::ContentViews::Teds
 		const FViewState* FindViewOfSource(const UE::Editor::ContentBrowser::IContentSource* Source) const;
 
 		TArray<RowHandle> RowsOf(const FViewState& View) const;
-
-		/** A view filter as the predicate the filter bar runs: the legacy backend's own test on the row's asset data. */
-		UE::Editor::DataStorage::Queries::TConstQueryFunction<bool> MakeValueFilter(const FContentViewFilter& Filter) const;
 
 		/** Read back a row's value in a column, in the legacy backend's types. */
 		FContentViewValue ReadValue(RowHandle Row, const FColumnSlot& Slot) const;

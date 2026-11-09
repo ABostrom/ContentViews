@@ -28,6 +28,9 @@ enum class EContentViewFilterOp : uint8
 
 	/** The column holds the gameplay tag Value, or a tag under it (Role holds Role.Striker). */
 	HasTag UMETA(DisplayName = "has tag"),
+
+	/** The column has any value for the row; Value is not read. */
+	HasValue UMETA(DisplayName = "has a value"),
 };
 
 /** One condition a row must meet: Column Operator Value, such as Pace >= 80. */

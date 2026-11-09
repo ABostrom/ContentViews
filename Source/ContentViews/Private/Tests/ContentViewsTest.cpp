@@ -182,7 +182,7 @@ bool FContentViewsListsTheClassTest::RunTest(const FString& Parameters)
 }
 
 /**
- * Situation: the same rows, filtered by number, inequality, gameplay tag and substring.
+ * Situation: the same rows, filtered by number, inequality, gameplay tag, substring and having a value.
  * Why it matters: filters are how a view says "Pace >= 80" or "is a keeper"; one that lets the wrong row through lies.
  * Pass: each filter keeps exactly the rows that meet it, and a non-number for >= is refused.
  */
@@ -210,6 +210,8 @@ bool FContentViewsFiltersTest::RunTest(const FString& Parameters)
 		FString(TEXT("")));
 	TestEqual(TEXT("Crew contains ue"), Rows.Names({F::Filter(TEXT("Crew"), EContentViewFilterOp::Contains, TEXT("UE"))}),
 		FString(TEXT("Row_Slow")));
+	TestEqual(TEXT("Crew has a value (the child has no crew)"),
+		Rows.Names({F::Filter(TEXT("Crew"), EContentViewFilterOp::HasValue, TEXT(""))}), FString(TEXT("Row_Fast,Row_Slow")));
 	TestFalse(TEXT("Speed >= fast is refused"),
 		UE::ContentViews::CheckFilter(F::Filter(TEXT("Speed"), EContentViewFilterOp::AtLeast, TEXT("fast"))).IsEmpty());
 	return true;

@@ -12,8 +12,9 @@
 FString FContentViewFilter::Describe() const
 {
 	const UEnum* Ops = StaticEnum<EContentViewFilterOp>();
-	return FString::Printf(TEXT("%s %s %s"), *Column.ToString(),
-		*Ops->GetDisplayNameTextByValue(static_cast<int64>(Operator)).ToString(), *Value);
+	const FString Op = Ops->GetDisplayNameTextByValue(static_cast<int64>(Operator)).ToString();
+	return Operator == EContentViewFilterOp::HasValue ? FString::Printf(TEXT("%s %s"), *Column.ToString(), *Op)
+		: FString::Printf(TEXT("%s %s %s"), *Column.ToString(), *Op, *Value);
 }
 
 FPrimaryAssetType UContentViewBase::StaticAssetType()

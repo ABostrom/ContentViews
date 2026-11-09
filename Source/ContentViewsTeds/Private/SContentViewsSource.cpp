@@ -17,7 +17,6 @@
 #include "TedsQueryNode.h"
 #include "TedsQuerySearchNode.h"
 #include "TedsQueryStackExecutor.h"
-#include "TedsRowFilterNode.h"
 #include "TedsRowQueryResultsNode.h"
 #include "TedsRowSortNode.h"
 #include "Widgets/SBoxPanel.h"
@@ -89,16 +88,8 @@ void SContentViewsSource::Build()
 		.InSearchableQueryFlags(QueryStack::FQuerySearchNode::ESyncActions::RefreshOnUpdate)
 		.OutSearchNode(&Searched);
 
-	// The view's own filters, on as it opens, as the legacy backend applies them; then a shape filter per column.
+	// The view's own filters already decide its rows (the backend tags only rows that pass); a shape filter per column.
 	TArray<TSharedPtr<FTedsFilter>> Filters;
-	const TSharedPtr<FFilterCategory> ViewCategory = MakeShared<FFilterCategory>(LOCTEXT("ViewFilters", "View"),
-		LOCTEXT("ViewFiltersTooltip", "The view asset's filters."));
-	for (const FContentViewFilter& Filter : View->Filters)
-	{
-		const FString Said = Filter.Describe();
-		Filters.Add(MakeShared<FTedsFilter>(FName(*Said), FText::FromString(Said), FText::FromString(Said), NAME_None, ViewCategory,
-			Backend.MakeValueFilter(Filter), /*bActiveByDefault*/ true));
-	}
 	const TSharedPtr<FFilterCategory> ShapeCategory = MakeShared<FFilterCategory>(LOCTEXT("HasFilters", "Has a value"),
 		LOCTEXT("HasFiltersTooltip", "Rows with a value in a column."));
 	for (const FColumnSlot& Slot : State->Columns)
@@ -305,20 +296,6 @@ namespace UE::ContentViews::Teds
 			Algo::Reverse(Paths);
 		}
 		return Paths;
-	}
-
-	TArray<FString> FilterRows(const UContentViewDefinition& View, const FContentViewFilter& Filter)
-	{
-		FBackend& Backend = FBackend::Get();
-		const FViewState* State = Backend.FindView(FSoftObjectPath(&View));
-		if (!State)
-		{
-			return {};
-		}
-		ICoreProvider& Storage = *Backend.GetStorage();
-		const TSharedPtr<QueryStack::IRowNode> Rows = MakeShared<QueryStack::FRowQueryResultsNode>(Storage,
-			MakeShared<QueryStack::FQueryNode>(Storage, State->MakeRowQuery()), QueryStack::FRowQueryResultsNode::ESyncActions::RefreshOnUpdate);
-		return RunStack(Storage, MakeShared<QueryStack::FRowFilterNode>(&Storage, Rows, Backend.MakeValueFilter(Filter)));
 	}
 }
 

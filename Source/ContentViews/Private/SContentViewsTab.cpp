@@ -1,6 +1,5 @@
 #include "SContentViewsTab.h"
 
-#include "Algo/AllOf.h"
 #include "AssetDefinitionRegistry.h"
 #include "AssetRegistry/AssetRegistryHelpers.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -231,14 +230,7 @@ namespace
 			[WeakClass = TWeakObjectPtr<UClass>(RowClass), bSubclasses, Filters](const FAssetData& Asset)
 			{
 				const UClass* Class = WeakClass.Get();
-				if (!Class || !UE::ContentViews::IsRowOf(Asset, *Class, bSubclasses))
-				{
-					return true;
-				}
-				return !Algo::AllOf(Filters, [&Asset](const FContentViewFilter& Filter)
-				{
-					return UE::ContentViews::PassesFilter(Asset, Filter);
-				});
+				return !Class || !UE::ContentViews::IsViewRow(Asset, *Class, bSubclasses, Filters);
 			});
 
 		for (const FContentViewColumnInfo& Info : UE::ContentViews::DescribeColumns(View))

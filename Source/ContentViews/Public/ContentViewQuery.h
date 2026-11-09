@@ -62,6 +62,13 @@ namespace UE::ContentViews
 
 	CONTENTVIEWS_API bool PassesFilter(const FAssetData& Asset, const FContentViewFilter& Filter);
 
+	/**
+	 * Whether Asset is a row of a view over RowClass with Filters: IsRowOf, not a level's external actor, and passing every
+	 * filter. Both backends decide a view's rows with this, so they list the same ones.
+	 */
+	CONTENTVIEWS_API bool IsViewRow(const FAssetData& Asset, const UClass& RowClass, bool bIncludeSubclasses,
+		TConstArrayView<FContentViewFilter> Filters);
+
 	/** Every row of View passing its own filters and Extra, in registry order. */
 	CONTENTVIEWS_API TArray<FAssetData> GatherRows(const UContentViewDefinition& View,
 		TConstArrayView<FContentViewFilter> Extra = {});
